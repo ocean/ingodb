@@ -34,7 +34,9 @@ impl Database {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     let coll_config = Self::collection_config(&config, &data_dir, name);
                     match LsmEngine::open(coll_config) {
-                        Ok(engine) => { collections.insert(name.to_string(), engine); }
+                        Ok(engine) => {
+                            collections.insert(name.to_string(), engine);
+                        }
                         Err(e) => {
                             eprintln!("warning: failed to open collection {name}: {e}");
                         }
@@ -154,7 +156,9 @@ impl Database {
     /// Drop a collection. Cannot drop the `system` collection.
     pub fn drop_collection(&self, name: &str) -> Result<(), LsmError> {
         if name == "system" {
-            return Err(LsmError::NotImplemented("cannot drop system collection".into()));
+            return Err(LsmError::NotImplemented(
+                "cannot drop system collection".into(),
+            ));
         }
         let mut collections = self.collections.lock();
         collections.remove(name);
@@ -180,9 +184,9 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secondary;
     use ingodb_blob::{DocumentId, Value};
     use ingodb_query::{Filter, SortDirection, SortField};
-    use crate::secondary;
 
     fn test_db() -> (Database, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -194,7 +198,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let db = Database::open(config).unwrap();
         (db, dir)
@@ -230,12 +238,17 @@ mod tests {
         db.with_collection("users", |engine| {
             engine.put(blob)?;
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
 
-        let found = db.with_collection("users", |engine| engine.get(&id)).unwrap();
+        let found = db
+            .with_collection("users", |engine| engine.get(&id))
+            .unwrap();
         assert!(found.is_some());
 
-        let found = db.with_collection("orders", |engine| engine.get(&id)).unwrap();
+        let found = db
+            .with_collection("orders", |engine| engine.get(&id))
+            .unwrap();
         assert!(found.is_none());
     }
 
@@ -250,7 +263,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         let blob = IBlob::from_pairs(vec![
@@ -265,7 +282,8 @@ mod tests {
                 engine.put(blob)?;
                 engine.sync()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
         }
 
         {
@@ -303,7 +321,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         let blob = IBlob::from_pairs(vec![("x", Value::U64(42))]);
@@ -315,13 +337,16 @@ mod tests {
                 engine.put(blob)?;
                 engine.flush_memtable()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
         }
 
         {
             let db = Database::open(config).unwrap();
             assert!(db.list_collections().contains(&"mydata".to_string()));
-            let found = db.with_collection("mydata", |engine| engine.get(&id)).unwrap();
+            let found = db
+                .with_collection("mydata", |engine| engine.get(&id))
+                .unwrap();
             assert!(found.is_some(), "collection data survives restart");
         }
     }
@@ -337,7 +362,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         {
@@ -353,48 +382,66 @@ mod tests {
                 }
                 engine.flush_memtable()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Trigger reactive index creation
-            let sort = [SortField { field: "age".into(), direction: SortDirection::Ascending }];
+            let sort = [SortField {
+                field: "age".into(),
+                direction: SortDirection::Ascending,
+            }];
             for _ in 0..secondary::DEFAULT_INDEX_THRESHOLD {
                 db.with_collection("users", |engine| {
                     engine.scan(None, Some(&sort), None, None)?;
                     Ok(())
-                }).unwrap();
+                })
+                .unwrap();
             }
 
             // Verify index was built
-            let count = db.with_collection("users", |engine| {
-                Ok(engine.secondary_index_count())
-            }).unwrap();
+            let count = db
+                .with_collection("users", |engine| Ok(engine.secondary_index_count()))
+                .unwrap();
             assert_eq!(count, 1, "index should be built");
 
             // Verify metadata in system collection
-            let system_docs = db.system(|engine| {
-                engine.scan(None, None, None, None)
-            }).unwrap();
-            let index_docs: Vec<_> = system_docs.iter()
+            let system_docs = db
+                .system(|engine| engine.scan(None, None, None, None))
+                .unwrap();
+            let index_docs: Vec<_> = system_docs
+                .iter()
                 .filter(|d| d.get("type") == Some(&Value::String("index".into())))
                 .collect();
             assert_eq!(index_docs.len(), 1, "index metadata should be in system");
-            assert_eq!(index_docs[0].get("collection"), Some(&Value::String("users".into())));
-            assert_eq!(index_docs[0].get("fields"), Some(&Value::String("age".into())));
+            assert_eq!(
+                index_docs[0].get("collection"),
+                Some(&Value::String("users".into()))
+            );
+            assert_eq!(
+                index_docs[0].get("fields"),
+                Some(&Value::String("age".into()))
+            );
         }
 
         // Restart and verify index is loaded
         {
             let db = Database::open(config).unwrap();
-            let count = db.with_collection("users", |engine| {
-                Ok(engine.secondary_index_count())
-            }).unwrap();
-            assert_eq!(count, 1, "index should survive restart via system collection");
+            let count = db
+                .with_collection("users", |engine| Ok(engine.secondary_index_count()))
+                .unwrap();
+            assert_eq!(
+                count, 1,
+                "index should survive restart via system collection"
+            );
 
             // Verify it works
-            let sort = [SortField { field: "age".into(), direction: SortDirection::Ascending }];
-            let results = db.with_collection("users", |engine| {
-                engine.scan(None, Some(&sort), None, None)
-            }).unwrap();
+            let sort = [SortField {
+                field: "age".into(),
+                direction: SortDirection::Ascending,
+            }];
+            let results = db
+                .with_collection("users", |engine| engine.scan(None, Some(&sort), None, None))
+                .unwrap();
             assert_eq!(results.len(), 10);
         }
     }
@@ -410,7 +457,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         let update_id;
@@ -425,22 +476,31 @@ mod tests {
                 }
                 engine.flush_memtable()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Trigger index creation via sorted scan
-            let sort = [SortField { field: "val".into(), direction: SortDirection::Ascending }];
+            let sort = [SortField {
+                field: "val".into(),
+                direction: SortDirection::Ascending,
+            }];
             db.with_collection("data", |engine| {
                 engine.scan(None, Some(&sort), None, None)?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Now update a doc (this writes to index buffer)
             update_id = DocumentId::new();
             db.with_collection("data", |engine| {
-                engine.put(IBlob::with_id(update_id, [("val".into(), Value::U64(99))].into()))?;
+                engine.put(IBlob::with_id(
+                    update_id,
+                    [("val".into(), Value::U64(99))].into(),
+                ))?;
                 engine.sync()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Don't flush — the update is only in WAL + memtable + index buffer
         }
@@ -450,15 +510,25 @@ mod tests {
             let db = Database::open(config).unwrap();
 
             // The updated doc should appear in sorted scan via the index
-            let sort = [SortField { field: "val".into(), direction: SortDirection::Ascending }];
-            let results = db.with_collection("data", |engine| {
-                engine.scan(None, Some(&sort), None, None)
-            }).unwrap();
+            let sort = [SortField {
+                field: "val".into(),
+                direction: SortDirection::Ascending,
+            }];
+            let results = db
+                .with_collection("data", |engine| engine.scan(None, Some(&sort), None, None))
+                .unwrap();
 
-            let vals: Vec<u64> = results.iter()
-                .filter_map(|b| match b.get("val") { Some(Value::U64(n)) => Some(*n), _ => None })
+            let vals: Vec<u64> = results
+                .iter()
+                .filter_map(|b| match b.get("val") {
+                    Some(Value::U64(n)) => Some(*n),
+                    _ => None,
+                })
                 .collect();
-            assert!(vals.contains(&99), "WAL-recovered doc should be in index after restart");
+            assert!(
+                vals.contains(&99),
+                "WAL-recovered doc should be in index after restart"
+            );
         }
     }
 
@@ -481,7 +551,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5, // low: creates index on first scan
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         fn det_id(i: u64) -> DocumentId {
@@ -500,32 +574,46 @@ mod tests {
             // Insert 10 docs, flush
             db.with_collection("products", |engine| {
                 for i in 0..10u64 {
-                    engine.put(IBlob::with_id(det_id(i), [
-                        ("price".into(), Value::F64((i % 100) as f64 + 0.99)),
-                        ("name".into(), Value::String(format!("Product {i}"))),
-                    ].into()))?;
+                    engine.put(IBlob::with_id(
+                        det_id(i),
+                        [
+                            ("price".into(), Value::F64((i % 100) as f64 + 0.99)),
+                            ("name".into(), Value::String(format!("Product {i}"))),
+                        ]
+                        .into(),
+                    ))?;
                 }
                 engine.flush_memtable()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Trigger index creation via sorted scan
-            let sort = [SortField { field: "price".into(), direction: SortDirection::Ascending }];
+            let sort = [SortField {
+                field: "price".into(),
+                direction: SortDirection::Ascending,
+            }];
             db.with_collection("products", |engine| {
                 engine.scan(None, Some(&sort), None, None)?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
 
             // Update doc 0: price 0.99 → 999.99
             db.with_collection("products", |engine| {
-                engine.put(IBlob::with_id(target_id, [
-                    ("price".into(), Value::F64(999.99)),
-                    ("name".into(), Value::String("Expensive".into())),
-                ].into()))?;
+                engine.put(IBlob::with_id(
+                    target_id,
+                    [
+                        ("price".into(), Value::F64(999.99)),
+                        ("name".into(), Value::String("Expensive".into())),
+                    ]
+                    .into(),
+                ))?;
                 // Flush — must write secondary index entries atomically
                 engine.flush_memtable()?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
         }
 
         // Restart — but with HIGH spill threshold so the scan doesn't create
@@ -539,27 +627,41 @@ mod tests {
             let db = Database::open(config_high_spill).unwrap();
 
             // Verify index exists after restart
-            let idx_count = db.with_collection("products", |engine| {
-                Ok(engine.secondary_index_count())
-            }).unwrap();
+            let idx_count = db
+                .with_collection("products", |engine| Ok(engine.secondary_index_count()))
+                .unwrap();
             assert!(idx_count >= 1, "index should exist after restart");
 
             // Sorted scan — should use the existing index from disk
-            let sort = [SortField { field: "price".into(), direction: SortDirection::Ascending }];
-            let results = db.with_collection("products", |engine| {
-                engine.scan(None, Some(&sort), None, None)
-            }).unwrap();
+            let sort = [SortField {
+                field: "price".into(),
+                direction: SortDirection::Ascending,
+            }];
+            let results = db
+                .with_collection("products", |engine| {
+                    engine.scan(None, Some(&sort), None, None)
+                })
+                .unwrap();
 
             // ALL 10 docs should be present
-            assert_eq!(results.len(), 10,
-                "all 10 docs should be in sorted scan (got {})", results.len());
+            assert_eq!(
+                results.len(),
+                10,
+                "all 10 docs should be in sorted scan (got {})",
+                results.len()
+            );
 
             // The updated doc must be found with the new price
             let target = results.iter().find(|r| *r.id() == target_id);
-            assert!(target.is_some(),
-                "updated doc must appear in sorted scan via index after restart");
-            assert_eq!(target.unwrap().get("price"), Some(&Value::F64(999.99)),
-                "updated doc should have new price after restart");
+            assert!(
+                target.is_some(),
+                "updated doc must appear in sorted scan via index after restart"
+            );
+            assert_eq!(
+                target.unwrap().get("price"),
+                Some(&Value::F64(999.99)),
+                "updated doc should have new price after restart"
+            );
         }
     }
 }

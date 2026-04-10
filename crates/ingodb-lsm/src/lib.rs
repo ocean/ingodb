@@ -7,15 +7,15 @@ pub use database::Database;
 
 use ingodb_blob::{DocumentId, IBlob, Value};
 use ingodb_memtable::MemTable;
-use ingodb_query::{compare_values, Filter, Query, SortDirection, SortField};
+use ingodb_query::{Filter, Query, SortDirection, SortField, compare_values};
 use ingodb_sstable::{MvccKeyExtractor, SSTableReader, SSTableWriter};
 use ingodb_wal::Wal;
-use stats::{extract_filter_fields, QueryPattern, QueryStats, QueryTimer};
 use parking_lot::{Condvar, Mutex, RwLock};
+use stats::{QueryPattern, QueryStats, QueryTimer, extract_filter_fields};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -205,7 +205,8 @@ impl<'a> Snapshot<'a> {
         project: Option<&[String]>,
         limit: Option<usize>,
     ) -> Result<Vec<IBlob>, LsmError> {
-        self.engine.scan_at(filter, sort, project, limit, &self.version)
+        self.engine
+            .scan_at(filter, sort, project, limit, &self.version)
     }
 
     /// The snapshot version.
@@ -263,11 +264,7 @@ impl LsmEngine {
         if sst_dir.exists() {
             let mut sst_files: Vec<_> = std::fs::read_dir(&sst_dir)?
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "sst")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "sst"))
                 .collect();
 
             // Sort by name (which encodes creation order)
@@ -373,7 +370,8 @@ impl LsmEngine {
         if blobs.is_empty() {
             return Ok(());
         }
-        self.write_count.fetch_add(blobs.len() as u64, Ordering::Relaxed);
+        self.write_count
+            .fetch_add(blobs.len() as u64, Ordering::Relaxed);
 
         // Stamp versions
         for blob in blobs.iter_mut() {
@@ -465,7 +463,8 @@ impl LsmEngine {
         // Check active memtable first
         if let Some(blob) = self.memtable.read().get(id, snapshot) {
             let found = if blob.is_deleted() { None } else { Some(blob) };
-            self.query_stats.record(timer.finish(if found.is_some() { 1 } else { 0 }));
+            self.query_stats
+                .record(timer.finish(if found.is_some() { 1 } else { 0 }));
             return Ok(found);
         }
 
@@ -475,7 +474,8 @@ impl LsmEngine {
             for mt in immutables.iter().rev() {
                 if let Some(blob) = mt.get(id, snapshot) {
                     let found = if blob.is_deleted() { None } else { Some(blob) };
-                    self.query_stats.record(timer.finish(if found.is_some() { 1 } else { 0 }));
+                    self.query_stats
+                        .record(timer.finish(if found.is_some() { 1 } else { 0 }));
                     return Ok(found);
                 }
             }
@@ -487,7 +487,8 @@ impl LsmEngine {
             if let Some(blob) = sst.get_by_id_at(id, snapshot)? {
                 let found = if blob.is_deleted() { None } else { Some(blob) };
                 drop(sstables);
-                self.query_stats.record(timer.finish(if found.is_some() { 1 } else { 0 }));
+                self.query_stats
+                    .record(timer.finish(if found.is_some() { 1 } else { 0 }));
                 return Ok(found);
             }
         }
@@ -550,8 +551,11 @@ impl LsmEngine {
         let sst_id = self.next_sst_id.fetch_add(1, Ordering::SeqCst);
         let sst_path = self.config.data_dir.join(format!("{sst_id:012}.sst"));
 
-        SSTableWriter::with_block_size(self.config.block_size)
-            .write(&sst_path, &mut blobs, &MvccKeyExtractor)?;
+        SSTableWriter::with_block_size(self.config.block_size).write(
+            &sst_path,
+            &mut blobs,
+            &MvccKeyExtractor,
+        )?;
 
         // Step 2: Flush secondary index buffers to disk
         // Only if there are secondary indexes to flush.
@@ -625,7 +629,8 @@ impl LsmEngine {
 
         if let Some(pick) = ucs.pick_compaction(&metas) {
             let has_snapshots = self.oldest_snapshot().is_some();
-            let mut tombstone_filter = TombstoneFilter::new(pick.output_level, pick.max_level, has_snapshots);
+            let mut tombstone_filter =
+                TombstoneFilter::new(pick.output_level, pick.max_level, has_snapshots);
             self.run_compaction(&pick.inputs, Some(&mut tombstone_filter))?;
         }
 
@@ -663,8 +668,7 @@ impl LsmEngine {
         let sstables = self.sstables.read();
         let sst_refs: Vec<&SSTableReader> = sstables.iter().collect();
         // Estimate doc count without iterating all SSTables (which is O(total data))
-        let estimated_doc_count = sst_refs.len() as u64
-            * (self.config.memtable_size as u64 / 400)
+        let estimated_doc_count = sst_refs.len() as u64 * (self.config.memtable_size as u64 / 400)
             + self.memtable.read().len() as u64;
 
         for (fields, group_indices) in &field_groups {
@@ -675,7 +679,10 @@ impl LsmEngine {
                 // no-filter sort scans. A full rebuild from primary SSTables is correct.
                 let idx_name = fields.join("_");
                 let sst_id = self.next_sst_id.fetch_add(1, Ordering::SeqCst);
-                let merged_path = self.config.data_dir.join(format!("idx_{idx_name}_{sst_id:012}.sst"));
+                let merged_path = self
+                    .config
+                    .data_dir
+                    .join(format!("idx_{idx_name}_{sst_id:012}.sst"));
 
                 if let Ok(merged) = secondary::SecondaryIndex::build(
                     fields,
@@ -755,24 +762,32 @@ impl LsmEngine {
             - (self.config.adaptive_w_max - self.config.adaptive_w_min) as f64 * read_ratio)
             as i32;
 
-        self.target_w.store(target_w, std::sync::atomic::Ordering::Relaxed);
+        self.target_w
+            .store(target_w, std::sync::atomic::Ordering::Relaxed);
 
         let current_w = self.effective_w.load(std::sync::atomic::Ordering::Relaxed);
         let step = self.config.adaptive_w_max_step;
 
         // Clamp change to ±step
         let new_w = if target_w > current_w {
-            (current_w + step).min(target_w).min(self.config.adaptive_w_max)
+            (current_w + step)
+                .min(target_w)
+                .min(self.config.adaptive_w_max)
         } else if target_w < current_w {
-            (current_w - step).max(target_w).max(self.config.adaptive_w_min)
+            (current_w - step)
+                .max(target_w)
+                .max(self.config.adaptive_w_min)
         } else {
             current_w
         };
 
         if new_w != current_w {
-            self.effective_w.store(new_w, std::sync::atomic::Ordering::Relaxed);
-            eprintln!("[ingodb] adaptive W: {} → {} (read_ratio={:.2}, target={}, step-limited)",
-                current_w, new_w, read_ratio, target_w);
+            self.effective_w
+                .store(new_w, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "[ingodb] adaptive W: {} → {} (read_ratio={:.2}, target={}, step-limited)",
+                current_w, new_w, read_ratio, target_w
+            );
         }
 
         *last = Instant::now();
@@ -799,7 +814,9 @@ impl LsmEngine {
 
         // Sort by _id, then _version desc
         merged.sort_by(|a, b| {
-            a.id().cmp(b.id()).then_with(|| b.version().cmp(a.version()))
+            a.id()
+                .cmp(b.id())
+                .then_with(|| b.version().cmp(a.version()))
         });
 
         // MVCC-aware dedup: keep versions referenced by active snapshots
@@ -852,17 +869,28 @@ impl LsmEngine {
         // Write merged SSTable
         let sst_id = self.next_sst_id.fetch_add(1, Ordering::SeqCst);
         let output_path = self.config.data_dir.join(format!("{sst_id:012}.sst"));
-        SSTableWriter::with_block_size(self.config.block_size)
-            .write(&output_path, &mut merged, &MvccKeyExtractor)?;
+        SSTableWriter::with_block_size(self.config.block_size).write(
+            &output_path,
+            &mut merged,
+            &MvccKeyExtractor,
+        )?;
         let new_reader = SSTableReader::open(&output_path)?;
         let output_bytes = new_reader.file_size();
 
         // Record compaction stats
         self.compaction_stats.runs.fetch_add(1, Ordering::Relaxed);
-        self.compaction_stats.bytes_read.fetch_add(input_bytes, Ordering::Relaxed);
-        self.compaction_stats.bytes_written.fetch_add(output_bytes, Ordering::Relaxed);
-        self.compaction_stats.sstables_read.fetch_add(num_inputs, Ordering::Relaxed);
-        self.compaction_stats.sstables_written.fetch_add(1, Ordering::Relaxed);
+        self.compaction_stats
+            .bytes_read
+            .fetch_add(input_bytes, Ordering::Relaxed);
+        self.compaction_stats
+            .bytes_written
+            .fetch_add(output_bytes, Ordering::Relaxed);
+        self.compaction_stats
+            .sstables_read
+            .fetch_add(num_inputs, Ordering::Relaxed);
+        self.compaction_stats
+            .sstables_written
+            .fetch_add(1, Ordering::Relaxed);
 
         // Swap old SSTables for new one
         let mut sstables = self.sstables.write();
@@ -972,18 +1000,23 @@ impl LsmEngine {
                         let mut handles = Vec::new();
                         for pick in picks.into_iter().take(num_threads) {
                             let engine = Arc::clone(&engine);
-                            handles.push(std::thread::Builder::new()
-                                .name("ingodb-compaction-worker".into())
-                                .spawn(move || {
-                                    let has_snapshots = engine.oldest_snapshot().is_some();
-                                    let mut tombstone_filter = TombstoneFilter::new(
-                                        pick.output_level, pick.max_level, has_snapshots,
-                                    );
-                                    let _ = engine.run_compaction(
-                                        &pick.inputs, Some(&mut tombstone_filter),
-                                    );
-                                })
-                                .expect("failed to spawn compaction worker"));
+                            handles.push(
+                                std::thread::Builder::new()
+                                    .name("ingodb-compaction-worker".into())
+                                    .spawn(move || {
+                                        let has_snapshots = engine.oldest_snapshot().is_some();
+                                        let mut tombstone_filter = TombstoneFilter::new(
+                                            pick.output_level,
+                                            pick.max_level,
+                                            has_snapshots,
+                                        );
+                                        let _ = engine.run_compaction(
+                                            &pick.inputs,
+                                            Some(&mut tombstone_filter),
+                                        );
+                                    })
+                                    .expect("failed to spawn compaction worker"),
+                            );
                         }
                         // Wait for all workers to finish
                         for h in handles {
@@ -1039,7 +1072,10 @@ impl LsmEngine {
     pub fn snapshot(&self) -> Snapshot<'_> {
         let version = DocumentId::new();
         self.active_snapshots.lock().insert(version);
-        Snapshot { engine: self, version }
+        Snapshot {
+            engine: self,
+            version,
+        }
     }
 
     /// Oldest active snapshot version, or None if no snapshots active.
@@ -1049,7 +1085,10 @@ impl LsmEngine {
 
     /// Check if a secondary index exists for the given sort fields.
     fn has_secondary_index(&self, sort_fields: &[String]) -> bool {
-        self.secondary_indexes.lock().iter().any(|idx| idx.matches_sort(sort_fields))
+        self.secondary_indexes
+            .lock()
+            .iter()
+            .any(|idx| idx.matches_sort(sort_fields))
     }
 
     /// Build a secondary index for the given sort fields from current SSTables.
@@ -1091,7 +1130,9 @@ impl LsmEngine {
         limit: Option<usize>,
     ) -> Option<Result<Vec<IBlob>, LsmError>> {
         let indexes = self.secondary_indexes.lock();
-        let index = indexes.iter().find(|idx| idx.matches_query(sort_fields, filter))?;
+        let index = indexes
+            .iter()
+            .find(|idx| idx.matches_query(sort_fields, filter))?;
         index.mark_used();
 
         // Read sorted entries and clone fields before dropping the lock
@@ -1113,9 +1154,9 @@ impl LsmEngine {
             match self.get(&id) {
                 Ok(Some(blob)) => {
                     // Stale check: verify indexed field values match the primary
-                    let is_current = index_fields.iter().all(|f| {
-                        blob.get_field(f) == projected.get_field(f)
-                    });
+                    let is_current = index_fields
+                        .iter()
+                        .all(|f| blob.get_field(f) == projected.get_field(f));
                     if !is_current {
                         continue;
                     }
@@ -1138,21 +1179,24 @@ impl LsmEngine {
         }
 
         // Merge with memtable (always fresh, may have docs not in the index)
-        let memtable_docs: Vec<IBlob> = self.memtable.read().iter()
+        let memtable_docs: Vec<IBlob> = self
+            .memtable
+            .read()
+            .iter()
             .map(|(_, blob)| blob)
             .filter(|blob| !blob.is_deleted())
-            .filter(|blob| {
-                filter.map_or(true, |f| f.matches(&|field| blob.get_field(field)))
-            })
+            .filter(|blob| filter.map_or(true, |f| f.matches(&|field| blob.get_field(field))))
             .collect();
 
         if !memtable_docs.is_empty() {
             // Merge: memtable version wins (newer), replace any matching index results
-            let memtable_ids: std::collections::HashSet<DocumentId> = memtable_docs.iter().map(|b| *b.id()).collect();
+            let memtable_ids: std::collections::HashSet<DocumentId> =
+                memtable_docs.iter().map(|b| *b.id()).collect();
             results.retain(|b| !memtable_ids.contains(b.id()));
 
             // Add memtable docs (dedup within memtable docs by id)
-            let mut seen: std::collections::HashSet<DocumentId> = results.iter().map(|b| *b.id()).collect();
+            let mut seen: std::collections::HashSet<DocumentId> =
+                results.iter().map(|b| *b.id()).collect();
             for doc in memtable_docs {
                 if seen.insert(*doc.id()) {
                     results.push(doc);
@@ -1160,15 +1204,21 @@ impl LsmEngine {
             }
 
             // Re-sort by the indexed fields
-            let sort_field_list: Vec<SortField> = sort_fields.iter()
-                .map(|f| SortField { field: f.clone(), direction: SortDirection::Ascending })
+            let sort_field_list: Vec<SortField> = sort_fields
+                .iter()
+                .map(|f| SortField {
+                    field: f.clone(),
+                    direction: SortDirection::Ascending,
+                })
                 .collect();
             results.sort_by(|a, b| {
                 for sf in &sort_field_list {
                     let va = a.get_field(&sf.field);
                     let vb = b.get_field(&sf.field);
                     let ord = match (&va, &vb) {
-                        (Some(va), Some(vb)) => compare_values(va, vb).unwrap_or(std::cmp::Ordering::Equal),
+                        (Some(va), Some(vb)) => {
+                            compare_values(va, vb).unwrap_or(std::cmp::Ordering::Equal)
+                        }
                         (Some(_), None) => std::cmp::Ordering::Less,
                         (None, Some(_)) => std::cmp::Ordering::Greater,
                         (None, None) => std::cmp::Ordering::Equal,
@@ -1198,7 +1248,10 @@ impl LsmEngine {
     ) -> Result<(), LsmError> {
         let idx_name = sort_fields.join("_");
         let sst_id = self.next_sst_id.fetch_add(1, Ordering::SeqCst);
-        let idx_path = self.config.data_dir.join(format!("idx_{idx_name}_{sst_id:012}.sst"));
+        let idx_path = self
+            .config
+            .data_dir
+            .join(format!("idx_{idx_name}_{sst_id:012}.sst"));
 
         let index = secondary::SecondaryIndex::build_partial(
             sort_fields,
@@ -1217,9 +1270,10 @@ impl LsmEngine {
         // Add alongside existing indexes for the same fields (compaction will merge)
         // Only replace if the exact same range already exists
         let mut indexes = self.secondary_indexes.lock();
-        if let Some(pos) = indexes.iter().position(|idx| {
-            idx.matches_sort(sort_fields) && idx.range == range
-        }) {
+        if let Some(pos) = indexes
+            .iter()
+            .position(|idx| idx.matches_sort(sort_fields) && idx.range == range)
+        {
             let old = indexes.remove(pos);
             std::fs::remove_file(&old.path).ok();
         }
@@ -1257,21 +1311,17 @@ impl LsmEngine {
 
         // Check if we have an index on this field
         let indexes = self.secondary_indexes.lock();
-        let index = indexes.iter().find(|idx| {
-            idx.fields.len() == 1 && idx.fields[0] == field
-        })?;
+        let index = indexes
+            .iter()
+            .find(|idx| idx.fields.len() == 1 && idx.fields[0] == field)?;
         index.mark_used();
 
         // Range scan on the index — O(log N + R) instead of O(N)
-        let range_entries = match index.range_scan(
-            start_val.as_ref(),
-            end_val.as_ref(),
-        ) {
+        let range_entries = match index.range_scan(start_val.as_ref(), end_val.as_ref()) {
             Ok(entries) => entries,
             Err(e) => return Some(Err(e)),
         };
         drop(indexes);
-
 
         let mut results = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -1325,7 +1375,12 @@ impl LsmEngine {
     }
 
     /// Load an existing secondary index from disk.
-    pub fn load_secondary_index(&self, fields: Vec<String>, range: Option<Filter>, path: &Path) -> Result<(), LsmError> {
+    pub fn load_secondary_index(
+        &self,
+        fields: Vec<String>,
+        range: Option<Filter>,
+        path: &Path,
+    ) -> Result<(), LsmError> {
         let index = secondary::SecondaryIndex::open(fields, range, path)?;
         self.secondary_indexes.lock().push(index);
         Ok(())
@@ -1384,53 +1439,67 @@ impl LsmEngine {
         let mut timer = QueryTimer::start(QueryPattern {
             query_type: "scan".into(),
             filter_fields: filter.map(extract_filter_fields).unwrap_or_default(),
-            sort_fields: sort.map(|s| s.iter().map(|sf| sf.field.clone()).collect()).unwrap_or_default(),
+            sort_fields: sort
+                .map(|s| s.iter().map(|sf| sf.field.clone()).collect())
+                .unwrap_or_default(),
             join_edge: None,
         });
 
         // Try secondary index for sorted scans (only for latest snapshot)
         if *snapshot == DocumentId::max() {
-        if let Some(sort_fields) = sort {
-            let field_names: Vec<String> = sort_fields.iter().map(|sf| sf.field.clone()).collect();
-            let all_ascending = sort_fields.iter().all(|sf| sf.direction == SortDirection::Ascending);
-            let all_descending = sort_fields.iter().all(|sf| sf.direction == SortDirection::Descending);
+            if let Some(sort_fields) = sort {
+                let field_names: Vec<String> =
+                    sort_fields.iter().map(|sf| sf.field.clone()).collect();
+                let all_ascending = sort_fields
+                    .iter()
+                    .all(|sf| sf.direction == SortDirection::Ascending);
+                let all_descending = sort_fields
+                    .iter()
+                    .all(|sf| sf.direction == SortDirection::Descending);
 
-            if all_ascending || all_descending {
-                if let Some(result) = self.scan_with_secondary_index(&field_names, filter, limit) {
-                    let mut results = result?;
-                    if all_descending {
-                        results.reverse();
-                        // Re-apply limit after reverse (index scan may have applied limit from the wrong end)
-                        if let Some(lim) = limit {
-                            results.truncate(lim);
+                if all_ascending || all_descending {
+                    if let Some(result) =
+                        self.scan_with_secondary_index(&field_names, filter, limit)
+                    {
+                        let mut results = result?;
+                        if all_descending {
+                            results.reverse();
+                            // Re-apply limit after reverse (index scan may have applied limit from the wrong end)
+                            if let Some(lim) = limit {
+                                results.truncate(lim);
+                            }
                         }
+                        if let Some(fields) = project {
+                            results = results
+                                .into_iter()
+                                .map(|blob| blob.project(fields))
+                                .collect();
+                        }
+                        let docs_returned = results.len() as u64;
+                        timer.set_docs_scanned(docs_returned);
+                        self.query_stats.record(timer.finish(docs_returned));
+                        return Ok(results);
                     }
-                    if let Some(fields) = project {
-                        results = results.into_iter().map(|blob| blob.project(fields)).collect();
-                    }
-                    let docs_returned = results.len() as u64;
-                    timer.set_docs_scanned(docs_returned);
-                    self.query_stats.record(timer.finish(docs_returned));
-                    return Ok(results);
                 }
             }
-        }
-        // Try secondary index for filter-only scans (no sort required)
-        if sort.is_none() {
-            if let Some(filter) = filter {
-                if let Some(result) = self.scan_with_filter_index(filter, limit, snapshot) {
-                    let mut results = result?;
-                    if let Some(fields) = project {
-                        results = results.into_iter().map(|blob| blob.project(fields)).collect();
+            // Try secondary index for filter-only scans (no sort required)
+            if sort.is_none() {
+                if let Some(filter) = filter {
+                    if let Some(result) = self.scan_with_filter_index(filter, limit, snapshot) {
+                        let mut results = result?;
+                        if let Some(fields) = project {
+                            results = results
+                                .into_iter()
+                                .map(|blob| blob.project(fields))
+                                .collect();
+                        }
+                        let docs_returned = results.len() as u64;
+                        timer.set_docs_scanned(docs_returned);
+                        self.query_stats.record(timer.finish(docs_returned));
+                        return Ok(results);
                     }
-                    let docs_returned = results.len() as u64;
-                    timer.set_docs_scanned(docs_returned);
-                    self.query_stats.record(timer.finish(docs_returned));
-                    return Ok(results);
                 }
             }
-        }
-
         } // end secondary index check (latest snapshot only)
 
         // Collect all IBlobs from memtable + SSTables
@@ -1455,7 +1524,9 @@ impl LsmEngine {
 
         // Merge: sort by _id, dedup keeping highest _version (within snapshot)
         all.sort_by(|a, b| {
-            a.id().cmp(b.id()).then_with(|| b.version().cmp(a.version()))
+            a.id()
+                .cmp(b.id())
+                .then_with(|| b.version().cmp(a.version()))
         });
         all.dedup_by(|a, b| a.id() == b.id());
 
@@ -1487,7 +1558,7 @@ impl LsmEngine {
                         (Some(va), Some(vb)) => {
                             compare_values(va, vb).unwrap_or(std::cmp::Ordering::Equal)
                         }
-                        (Some(_), None) => std::cmp::Ordering::Less,   // non-null first
+                        (Some(_), None) => std::cmp::Ordering::Less, // non-null first
                         (None, Some(_)) => std::cmp::Ordering::Greater,
                         (None, None) => std::cmp::Ordering::Equal,
                     };
@@ -1507,20 +1578,16 @@ impl LsmEngine {
         // Index is always stored in ascending order (descending reads reverse it).
         if let Some(sort_fields) = sort {
             let field_names: Vec<String> = sort_fields.iter().map(|sf| sf.field.clone()).collect();
-            let all_same_direction = sort_fields.iter().all(|sf| sf.direction == sort_fields[0].direction);
-            if all_same_direction
-                && results.len() > self.config.sort_spill_threshold
-            {
+            let all_same_direction = sort_fields
+                .iter()
+                .all(|sf| sf.direction == sort_fields[0].direction);
+            if all_same_direction && results.len() > self.config.sort_spill_threshold {
                 // For descending, reverse results back to ascending before spilling
                 let mut to_spill = results.clone();
                 if sort_fields[0].direction == SortDirection::Descending {
                     to_spill.reverse();
                 }
-                let _ = self.spill_to_partial_index(
-                    &field_names,
-                    filter.cloned(),
-                    &mut to_spill,
-                );
+                let _ = self.spill_to_partial_index(&field_names, filter.cloned(), &mut to_spill);
             }
         }
 
@@ -1531,7 +1598,10 @@ impl LsmEngine {
 
         // Apply projection (last — sort fields may not be projected)
         if let Some(fields) = project {
-            results = results.into_iter().map(|blob| blob.project(fields)).collect();
+            results = results
+                .into_iter()
+                .map(|blob| blob.project(fields))
+                .collect();
         }
 
         // Record stats
@@ -1553,9 +1623,11 @@ impl LsmEngine {
                 };
                 if let Some(field) = field {
                     // Check if an index already exists for this field
-                    let has_index = self.secondary_indexes.lock().iter().any(|idx| {
-                        idx.fields.len() == 1 && idx.fields[0] == field
-                    });
+                    let has_index = self
+                        .secondary_indexes
+                        .lock()
+                        .iter()
+                        .any(|idx| idx.fields.len() == 1 && idx.fields[0] == field);
                     if !has_index {
                         // Check stats: build only if low selectivity and repeated
                         let pattern = QueryPattern {
@@ -1568,15 +1640,21 @@ impl LsmEngine {
                             if stats.selectivity() <= 0.5 && stats.count >= 2 {
                                 // Build a full-range index sorted by this field
                                 // Re-scan all docs to build a complete index
-                                let all_docs: Vec<IBlob> = self.memtable.read().iter()
+                                let all_docs: Vec<IBlob> = self
+                                    .memtable
+                                    .read()
+                                    .iter()
                                     .map(|(_, b)| b)
-                                    .chain(
-                                        self.sstables.read().iter()
-                                            .flat_map(|sst| sst.iter().unwrap_or_default().into_iter().map(|(_, b)| b))
-                                    )
+                                    .chain(self.sstables.read().iter().flat_map(|sst| {
+                                        sst.iter().unwrap_or_default().into_iter().map(|(_, b)| b)
+                                    }))
                                     .collect();
                                 let mut deduped = all_docs;
-                                deduped.sort_by(|a, b| a.id().cmp(b.id()).then_with(|| b.version().cmp(a.version())));
+                                deduped.sort_by(|a, b| {
+                                    a.id()
+                                        .cmp(b.id())
+                                        .then_with(|| b.version().cmp(a.version()))
+                                });
                                 deduped.dedup_by(|a, b| a.id() == b.id());
                                 deduped.retain(|b| !b.is_deleted());
 
@@ -1671,20 +1749,19 @@ impl LsmEngine {
     /// Execute a Liquid AST query.
     pub fn execute(&self, query: &Query) -> Result<Vec<IBlob>, LsmError> {
         match query {
-            Query::Get { id } => {
-                Ok(self.get(id)?.into_iter().collect())
-            }
-            Query::Scan { filter, sort, project, limit } => {
-                self.scan(
-                    filter.as_ref(),
-                    sort.as_deref(),
-                    project.as_deref(),
-                    *limit,
-                )
-            }
-            Query::Traverse { start, from_field, to_field, depth } => {
-                self.traverse(start.as_ref(), from_field, to_field, *depth)
-            }
+            Query::Get { id } => Ok(self.get(id)?.into_iter().collect()),
+            Query::Scan {
+                filter,
+                sort,
+                project,
+                limit,
+            } => self.scan(filter.as_ref(), sort.as_deref(), project.as_deref(), *limit),
+            Query::Traverse {
+                start,
+                from_field,
+                to_field,
+                depth,
+            } => self.traverse(start.as_ref(), from_field, to_field, *depth),
         }
     }
 }
@@ -1739,15 +1816,19 @@ mod tests {
         let categories = ["electronics", "books", "clothing", "home", "sports"];
         let category = categories[(i % categories.len() as u64) as usize];
         let price = (i % 1000) as f64 + 0.99;
-        IBlob::with_id(id, [
-            ("type".into(), Value::String("product".into())),
-            ("name".into(), Value::String(format!("Product #{i}"))),
-            ("category".into(), Value::String(category.into())),
-            ("price".into(), Value::F64(price)),
-            ("rating".into(), Value::F64((i % 50) as f64 / 10.0)),
-            ("stock".into(), Value::U64(i % 500)),
-            ("description".into(), Value::String(format!("Desc {i}"))),
-        ].into())
+        IBlob::with_id(
+            id,
+            [
+                ("type".into(), Value::String("product".into())),
+                ("name".into(), Value::String(format!("Product #{i}"))),
+                ("category".into(), Value::String(category.into())),
+                ("price".into(), Value::F64(price)),
+                ("rating".into(), Value::F64((i % 50) as f64 / 10.0)),
+                ("stock".into(), Value::U64(i % 500)),
+                ("description".into(), Value::String(format!("Desc {i}"))),
+            ]
+            .into(),
+        )
     }
 
     fn test_engine() -> (LsmEngine, tempfile::TempDir) {
@@ -1760,7 +1841,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
         (engine, dir)
@@ -1776,7 +1861,10 @@ mod tests {
         let found = engine.get(&id).unwrap().unwrap();
         assert_eq!(found.id(), &id);
         assert_eq!(found.fields(), blob.fields());
-        assert!(!found.version().is_nil(), "version should be stamped by engine");
+        assert!(
+            !found.version().is_nil(),
+            "version should be stamped by engine"
+        );
     }
 
     #[test]
@@ -1819,7 +1907,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         let blob = make_blob(42);
@@ -1837,7 +1929,10 @@ mod tests {
             let engine = LsmEngine::open(config).unwrap();
             let found = engine.get(&id).unwrap().unwrap();
             assert_eq!(found.id(), &id);
-            assert!(!found.version().is_nil(), "recovered blob should have version");
+            assert!(
+                !found.version().is_nil(),
+                "recovered blob should have version"
+            );
         }
     }
 
@@ -1946,7 +2041,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
         let id = DocumentId::new();
@@ -1963,8 +2062,11 @@ mod tests {
 
         // Should get v2, not v1
         let found = engine.get(&id).unwrap().unwrap();
-        assert_eq!(found.get("v"), Some(&Value::U64(2)),
-            "level-aware read should return newest version");
+        assert_eq!(
+            found.get("v"),
+            Some(&Value::U64(2)),
+            "level-aware read should return newest version"
+        );
     }
 
     #[test]
@@ -2051,12 +2153,17 @@ mod tests {
         for i in 0..5 {
             engine.put(make_blob(i)).unwrap();
         }
-        let results = engine.execute(&Query::Scan {
-            filter: Some(Filter::Lt { field: "n".into(), value: Value::U64(3) }),
-            sort: None,
-            project: None,
-            limit: None,
-        }).unwrap();
+        let results = engine
+            .execute(&Query::Scan {
+                filter: Some(Filter::Lt {
+                    field: "n".into(),
+                    value: Value::U64(3),
+                }),
+                sort: None,
+                project: None,
+                limit: None,
+            })
+            .unwrap();
         assert_eq!(results.len(), 3); // n=0,1,2
     }
 
@@ -2079,21 +2186,31 @@ mod tests {
         engine.put(user2).unwrap();
 
         // Create orders referencing users by _id
-        engine.put(IBlob::from_pairs(vec![
-            ("type", Value::String("order".into())),
-            ("user_id", Value::Uuid(user1_id)),
-            ("amount", Value::U64(100)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("type", Value::String("order".into())),
+                ("user_id", Value::Uuid(user1_id)),
+                ("amount", Value::U64(100)),
+            ]))
+            .unwrap();
 
         // Traverse: from orders, join user_id -> _id to find referenced users
-        let results = engine.traverse(
-            Some(&Filter::Eq { field: "type".into(), value: Value::String("order".into()) }),
-            "user_id",
-            "_id",
-            1,
-        ).unwrap();
+        let results = engine
+            .traverse(
+                Some(&Filter::Eq {
+                    field: "type".into(),
+                    value: Value::String("order".into()),
+                }),
+                "user_id",
+                "_id",
+                1,
+            )
+            .unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].get("name"), Some(&Value::String("Henrik".into())));
+        assert_eq!(
+            results[0].get("name"),
+            Some(&Value::String("Henrik".into()))
+        );
     }
 
     #[test]
@@ -2102,26 +2219,35 @@ mod tests {
 
         // Two users named Henrik
         for i in 0..2 {
-            engine.put(IBlob::from_pairs(vec![
-                ("type", Value::String("user".into())),
-                ("name", Value::String("Henrik".into())),
-                ("seq", Value::U64(i)),
-            ])).unwrap();
+            engine
+                .put(IBlob::from_pairs(vec![
+                    ("type", Value::String("user".into())),
+                    ("name", Value::String("Henrik".into())),
+                    ("seq", Value::U64(i)),
+                ]))
+                .unwrap();
         }
 
         // An order referencing "Henrik" by name
-        engine.put(IBlob::from_pairs(vec![
-            ("type", Value::String("order".into())),
-            ("user_name", Value::String("Henrik".into())),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("type", Value::String("order".into())),
+                ("user_name", Value::String("Henrik".into())),
+            ]))
+            .unwrap();
 
         // Traverse: orders.user_name -> users.name (non-unique — should find both)
-        let results = engine.traverse(
-            Some(&Filter::Eq { field: "type".into(), value: Value::String("order".into()) }),
-            "user_name",
-            "name",
-            1,
-        ).unwrap();
+        let results = engine
+            .traverse(
+                Some(&Filter::Eq {
+                    field: "type".into(),
+                    value: Value::String("order".into()),
+                }),
+                "user_name",
+                "name",
+                1,
+            )
+            .unwrap();
         assert_eq!(results.len(), 2, "non-unique join should find all matches");
     }
 
@@ -2153,14 +2279,22 @@ mod tests {
         engine.put(emp).unwrap();
 
         // Depth 1: company -> departments (join company _id -> dept.company_id)
-        let depts = engine.traverse(
-            Some(&Filter::Eq { field: "type".into(), value: Value::String("company".into()) }),
-            "_id",
-            "company_id",
-            1,
-        ).unwrap();
+        let depts = engine
+            .traverse(
+                Some(&Filter::Eq {
+                    field: "type".into(),
+                    value: Value::String("company".into()),
+                }),
+                "_id",
+                "company_id",
+                1,
+            )
+            .unwrap();
         assert_eq!(depts.len(), 1);
-        assert_eq!(depts[0].get("name"), Some(&Value::String("Engineering".into())));
+        assert_eq!(
+            depts[0].get("name"),
+            Some(&Value::String("Engineering".into()))
+        );
 
         // Depth 2: company -> dept -> employees (same edge pattern repeated)
         // For depth>1 with the same edge, we need the same from/to fields to chain.
@@ -2193,12 +2327,17 @@ mod tests {
         engine.put(dev).unwrap();
 
         // From dev, follow reports_to -> _id, depth 2
-        let chain = engine.traverse(
-            Some(&Filter::Eq { field: "role".into(), value: Value::String("Dev".into()) }),
-            "reports_to",
-            "_id",
-            2,
-        ).unwrap();
+        let chain = engine
+            .traverse(
+                Some(&Filter::Eq {
+                    field: "role".into(),
+                    value: Value::String("Dev".into()),
+                }),
+                "reports_to",
+                "_id",
+                2,
+            )
+            .unwrap();
         assert_eq!(chain.len(), 2, "depth 2 should find VP and CEO");
     }
 
@@ -2207,12 +2346,17 @@ mod tests {
         let (engine, _dir) = test_engine();
         engine.put(make_blob(1)).unwrap();
 
-        let results = engine.traverse(
-            Some(&Filter::Eq { field: "n".into(), value: Value::U64(1) }),
-            "nonexistent_field",
-            "_id",
-            1,
-        ).unwrap();
+        let results = engine
+            .traverse(
+                Some(&Filter::Eq {
+                    field: "n".into(),
+                    value: Value::U64(1),
+                }),
+                "nonexistent_field",
+                "_id",
+                1,
+            )
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -2234,12 +2378,17 @@ mod tests {
         engine.put(make_blob(1)).unwrap();
 
         // Scan filtering on _id
-        let results = engine.scan(
-            Some(&Filter::Eq { field: "_id".into(), value: Value::Uuid(id) }),
-            None,
-            None,
-            None,
-        ).unwrap();
+        let results = engine
+            .scan(
+                Some(&Filter::Eq {
+                    field: "_id".into(),
+                    value: Value::Uuid(id),
+                }),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("n"), Some(&Value::U64(42)));
     }
@@ -2251,14 +2400,23 @@ mod tests {
         engine.put(make_blob(10)).unwrap();
         engine.put(make_blob(20)).unwrap();
 
-        let results = engine.scan(
-            None,
-            Some(&[SortField { field: "n".into(), direction: SortDirection::Ascending }]),
-            None,
-            None,
-        ).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let results = engine
+            .scan(
+                None,
+                Some(&[SortField {
+                    field: "n".into(),
+                    direction: SortDirection::Ascending,
+                }]),
+                None,
+                None,
+            )
+            .unwrap();
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![10, 20, 30]);
     }
@@ -2270,14 +2428,23 @@ mod tests {
         engine.put(make_blob(10)).unwrap();
         engine.put(make_blob(20)).unwrap();
 
-        let results = engine.scan(
-            None,
-            Some(&[SortField { field: "n".into(), direction: SortDirection::Descending }]),
-            None,
-            None,
-        ).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let results = engine
+            .scan(
+                None,
+                Some(&[SortField {
+                    field: "n".into(),
+                    direction: SortDirection::Descending,
+                }]),
+                None,
+                None,
+            )
+            .unwrap();
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![30, 20, 10]);
     }
@@ -2289,14 +2456,23 @@ mod tests {
             engine.put(make_blob(i)).unwrap();
         }
         // Sort descending, take top 3
-        let results = engine.scan(
-            None,
-            Some(&[SortField { field: "n".into(), direction: SortDirection::Descending }]),
-            None,
-            Some(3),
-        ).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let results = engine
+            .scan(
+                None,
+                Some(&[SortField {
+                    field: "n".into(),
+                    direction: SortDirection::Descending,
+                }]),
+                None,
+                Some(3),
+            )
+            .unwrap();
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![9, 8, 7]);
     }
@@ -2308,17 +2484,29 @@ mod tests {
             engine.put(make_blob(i)).unwrap();
         }
         // Filter n > 5, sort ascending, project only "n"
-        let filter = Filter::Gt { field: "n".into(), value: Value::U64(5) };
-        let results = engine.scan(
-            Some(&filter),
-            Some(&[SortField { field: "n".into(), direction: SortDirection::Ascending }]),
-            Some(&["n".into()]),
-            None,
-        ).unwrap();
+        let filter = Filter::Gt {
+            field: "n".into(),
+            value: Value::U64(5),
+        };
+        let results = engine
+            .scan(
+                Some(&filter),
+                Some(&[SortField {
+                    field: "n".into(),
+                    direction: SortDirection::Ascending,
+                }]),
+                Some(&["n".into()]),
+                None,
+            )
+            .unwrap();
         assert_eq!(results.len(), 4); // 6,7,8,9
         assert!(results[0].is_projection());
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![6, 7, 8, 9]);
     }
@@ -2334,7 +2522,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
@@ -2347,17 +2539,28 @@ mod tests {
         assert_eq!(engine.secondary_index_count(), 0, "no index yet");
 
         // Run sorted scan DEFAULT_INDEX_THRESHOLD times to trigger reactive index
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         for _ in 0..secondary::DEFAULT_INDEX_THRESHOLD {
             engine.scan(None, Some(&sort), None, None).unwrap();
         }
 
-        assert_eq!(engine.secondary_index_count(), 1, "index should be created reactively");
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "index should be created reactively"
+        );
 
         // Next scan should use the index (and produce correct results)
         let results = engine.scan(None, Some(&sort), None, None).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, (0..10).collect::<Vec<u64>>());
     }
@@ -2373,7 +2576,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
@@ -2384,10 +2591,17 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // Sorted scan with ≤threshold results stays in memory, no index created
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
 
-        assert_eq!(engine.secondary_index_count(), 0, "should not build index below spill threshold");
+        assert_eq!(
+            engine.secondary_index_count(),
+            0,
+            "should not build index below spill threshold"
+        );
     }
 
     #[test]
@@ -2401,7 +2615,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
@@ -2414,7 +2632,10 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // Sorted scan creates index via spill
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(engine.secondary_index_count(), 1);
 
@@ -2441,7 +2662,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
@@ -2451,12 +2676,17 @@ mod tests {
 
         // Add enough docs to exceed spill threshold
         for i in [1u64, 2, 3, 4, 6, 8, 10, 11, 12] {
-            engine.put(IBlob::from_pairs(vec![("field1", Value::U64(i))])).unwrap();
+            engine
+                .put(IBlob::from_pairs(vec![("field1", Value::U64(i))]))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
         // Sorted scan creates index via spill (>5 results)
-        let sort = [SortField { field: "field1".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "field1".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(engine.secondary_index_count(), 1);
 
@@ -2465,28 +2695,54 @@ mod tests {
         engine.put(updated).unwrap();
 
         // Scan for field1 < 7 — should NOT find the old value (5)
-        let results = engine.scan(
-            Some(&Filter::Lt { field: "field1".into(), value: Value::U64(7) }),
-            Some(&sort),
-            None,
-            None,
-        ).unwrap();
-        let vals: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("field1") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let results = engine
+            .scan(
+                Some(&Filter::Lt {
+                    field: "field1".into(),
+                    value: Value::U64(7),
+                }),
+                Some(&sort),
+                None,
+                None,
+            )
+            .unwrap();
+        let vals: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("field1") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
-        assert_eq!(vals, vec![1, 2, 3, 4, 6], "old value 5 should not appear (stale, updated to 9)");
+        assert_eq!(
+            vals,
+            vec![1, 2, 3, 4, 6],
+            "old value 5 should not appear (stale, updated to 9)"
+        );
 
         // Scan for field1 > 7 — should find the new value (9) plus 8, 10, 11, 12
-        let results = engine.scan(
-            Some(&Filter::Gt { field: "field1".into(), value: Value::U64(7) }),
-            Some(&sort),
-            None,
-            None,
-        ).unwrap();
-        let vals: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("field1") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let results = engine
+            .scan(
+                Some(&Filter::Gt {
+                    field: "field1".into(),
+                    value: Value::U64(7),
+                }),
+                Some(&sort),
+                None,
+                None,
+            )
+            .unwrap();
+        let vals: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("field1") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
-        assert_eq!(vals, vec![8, 9, 10, 11, 12], "new value 9 should appear among results > 7");
+        assert_eq!(
+            vals,
+            vec![8, 9, 10, 11, 12],
+            "new value 9 should appear among results > 7"
+        );
     }
 
     #[test]
@@ -2501,29 +2757,48 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         for i in 0..8u64 {
-            engine.put(IBlob::from_pairs(vec![("val", Value::U64(i * 10))])).unwrap();
+            engine
+                .put(IBlob::from_pairs(vec![("val", Value::U64(i * 10))]))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
         // Sorted scan creates index via spill (8 > 5)
-        let sort = [SortField { field: "val".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "val".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(engine.secondary_index_count(), 1);
 
         // Insert new doc after index built
-        engine.put(IBlob::from_pairs(vec![("val", Value::U64(25))])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![("val", Value::U64(25))]))
+            .unwrap();
 
         // Sorted scan should include the new doc in correct position
         let results = engine.scan(None, Some(&sort), None, None).unwrap();
-        let vals: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("val") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let vals: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("val") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
-        assert_eq!(vals, vec![0, 10, 20, 25, 30, 40, 50, 60, 70], "new doc should appear in sorted position");
+        assert_eq!(
+            vals,
+            vec![0, 10, 20, 25, 30, 40, 50, 60, 70],
+            "new doc should appear in sorted position"
+        );
     }
 
     #[test]
@@ -2539,11 +2814,18 @@ mod tests {
         assert_eq!(engine.secondary_index_count(), 0);
 
         // Sorted scan should spill to disk and create an index
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         let results = engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(results.len(), 10);
 
-        assert_eq!(engine.secondary_index_count(), 1, "should spill to disk as partial index");
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "should spill to disk as partial index"
+        );
     }
 
     #[test]
@@ -2556,11 +2838,18 @@ mod tests {
         }
         engine.flush_memtable().unwrap();
 
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         let results = engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(results.len(), 5);
 
-        assert_eq!(engine.secondary_index_count(), 0, "small sort should stay in memory");
+        assert_eq!(
+            engine.secondary_index_count(),
+            0,
+            "small sort should stay in memory"
+        );
     }
 
     #[test]
@@ -2573,14 +2862,24 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // First sorted scan creates an index (full range, no filter)
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert_eq!(engine.secondary_index_count(), 1);
 
         // Second sorted scan with a filter creates a new partial index, replacing the old
-        let filter = Filter::Lt { field: "n".into(), value: Value::U64(10) };
+        let filter = Filter::Lt {
+            field: "n".into(),
+            value: Value::U64(10),
+        };
         engine.scan(Some(&filter), Some(&sort), None, None).unwrap();
-        assert_eq!(engine.secondary_index_count(), 1, "should replace, not accumulate");
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "should replace, not accumulate"
+        );
     }
 
     #[test]
@@ -2593,15 +2892,25 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // First, ascending scan to create the index
-        let asc_sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let asc_sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&asc_sort), None, None).unwrap();
         assert_eq!(engine.secondary_index_count(), 1);
 
         // Now descending scan should reuse the same index (reversed)
-        let desc_sort = [SortField { field: "n".into(), direction: SortDirection::Descending }];
+        let desc_sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Descending,
+        }];
         let results = engine.scan(None, Some(&desc_sort), None, None).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
 
@@ -2619,13 +2928,24 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // Descending scan should spill to disk and create an ascending index
-        let desc_sort = [SortField { field: "n".into(), direction: SortDirection::Descending }];
+        let desc_sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Descending,
+        }];
         let results = engine.scan(None, Some(&desc_sort), None, None).unwrap();
-        let ns: Vec<u64> = results.iter()
-            .filter_map(|b| match b.get("n") { Some(Value::U64(n)) => Some(*n), _ => None })
+        let ns: Vec<u64> = results
+            .iter()
+            .filter_map(|b| match b.get("n") {
+                Some(Value::U64(n)) => Some(*n),
+                _ => None,
+            })
             .collect();
         assert_eq!(ns, vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
-        assert_eq!(engine.secondary_index_count(), 1, "descending scan should create ascending index");
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "descending scan should create ascending index"
+        );
     }
 
     #[test]
@@ -2639,7 +2959,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
@@ -2649,15 +2973,32 @@ mod tests {
         engine.flush_memtable().unwrap();
 
         // Two different filtered scans produce two partial indexes
-        let sort = [SortField { field: "n".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "n".into(),
+            direction: SortDirection::Ascending,
+        }];
 
-        let filter1 = Filter::Lt { field: "n".into(), value: Value::U64(10) };
-        engine.scan(Some(&filter1), Some(&sort), None, None).unwrap();
+        let filter1 = Filter::Lt {
+            field: "n".into(),
+            value: Value::U64(10),
+        };
+        engine
+            .scan(Some(&filter1), Some(&sort), None, None)
+            .unwrap();
 
-        let filter2 = Filter::Gt { field: "n".into(), value: Value::U64(5) };
-        engine.scan(Some(&filter2), Some(&sort), None, None).unwrap();
+        let filter2 = Filter::Gt {
+            field: "n".into(),
+            value: Value::U64(5),
+        };
+        engine
+            .scan(Some(&filter2), Some(&sort), None, None)
+            .unwrap();
 
-        assert_eq!(engine.secondary_index_count(), 2, "two different ranges should accumulate");
+        assert_eq!(
+            engine.secondary_index_count(),
+            2,
+            "two different ranges should accumulate"
+        );
     }
 
     // ---- MVCC Snapshot Tests ----
@@ -2667,7 +3008,9 @@ mod tests {
         let (engine, _dir) = test_engine();
         let id = DocumentId::new();
 
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into()))
+            .unwrap();
 
         let snap = engine.snapshot();
 
@@ -2707,7 +3050,10 @@ mod tests {
         assert_eq!(snapped.len(), 5);
         for blob in &snapped {
             if let Some(Value::U64(n)) = blob.get("n") {
-                assert!(*n < 100, "snapshot should not see docs inserted after snapshot");
+                assert!(
+                    *n < 100,
+                    "snapshot should not see docs inserted after snapshot"
+                );
             }
         }
     }
@@ -2723,17 +3069,25 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         let id = DocumentId::new();
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into()))
+            .unwrap();
 
         let snap = engine.snapshot();
 
         // Update and flush
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into()))
+            .unwrap();
         engine.flush_memtable().unwrap();
 
         // Snapshot still sees old version
@@ -2750,7 +3104,9 @@ mod tests {
         let (engine, _dir) = test_engine();
         let id = DocumentId::new();
 
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into()))
+            .unwrap();
 
         let snap = engine.snapshot();
 
@@ -2769,18 +3125,27 @@ mod tests {
         let (engine, _dir) = test_engine();
         let id = DocumentId::new();
 
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into()))
+            .unwrap();
         let s1 = engine.snapshot();
 
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into()))
+            .unwrap();
         let s2 = engine.snapshot();
 
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(3))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(3))].into()))
+            .unwrap();
 
         // Each snapshot sees its own point in time
         assert_eq!(s1.get(&id).unwrap().unwrap().get("x"), Some(&Value::U64(1)));
         assert_eq!(s2.get(&id).unwrap().unwrap().get("x"), Some(&Value::U64(2)));
-        assert_eq!(engine.get(&id).unwrap().unwrap().get("x"), Some(&Value::U64(3)));
+        assert_eq!(
+            engine.get(&id).unwrap().unwrap().get("x"),
+            Some(&Value::U64(3))
+        );
     }
 
     #[test]
@@ -2794,17 +3159,25 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 1000,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         let id = DocumentId::new();
-        engine.put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into())).unwrap();
+        engine
+            .put(IBlob::with_id(id, [("x".into(), Value::U64(1))].into()))
+            .unwrap();
         engine.flush_memtable().unwrap();
 
         {
             let _snap = engine.snapshot();
-            engine.put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into())).unwrap();
+            engine
+                .put(IBlob::with_id(id, [("x".into(), Value::U64(2))].into()))
+                .unwrap();
             engine.flush_memtable().unwrap();
             // Snapshot is alive — compaction should keep both versions
         }
@@ -2830,41 +3203,61 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         // Insert 10 docs and flush to create primary SSTables
         let target_id = deterministic_id(0);
         for i in 0..10u64 {
-            engine.put(make_product_with_id(deterministic_id(i), i)).unwrap();
+            engine
+                .put(make_product_with_id(deterministic_id(i), i))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
         // Trigger index creation via sorted scan
-        let sort = [SortField { field: "price".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "price".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert!(engine.secondary_index_count() >= 1);
 
         // Update doc 0's price (was 0.99, now 999.99)
-        engine.put(IBlob::with_id(target_id, [
-            ("type".into(), Value::String("product".into())),
-            ("name".into(), Value::String("Updated".into())),
-            ("category".into(), Value::String("electronics".into())),
-            ("price".into(), Value::F64(999.99)),
-            ("rating".into(), Value::F64(0.0)),
-            ("stock".into(), Value::U64(0)),
-            ("description".into(), Value::String("Updated".into())),
-        ].into())).unwrap();
+        engine
+            .put(IBlob::with_id(
+                target_id,
+                [
+                    ("type".into(), Value::String("product".into())),
+                    ("name".into(), Value::String("Updated".into())),
+                    ("category".into(), Value::String("electronics".into())),
+                    ("price".into(), Value::F64(999.99)),
+                    ("rating".into(), Value::F64(0.0)),
+                    ("stock".into(), Value::U64(0)),
+                    ("description".into(), Value::String("Updated".into())),
+                ]
+                .into(),
+            ))
+            .unwrap();
         engine.flush_memtable().unwrap();
 
         // Scan for cheap products — doc 0 should NOT appear (price is now 999.99)
-        let results = engine.scan(
-            Some(&Filter::Lt { field: "price".into(), value: Value::F64(10.0) }),
-            Some(&sort),
-            None,
-            None,
-        ).unwrap();
+        let results = engine
+            .scan(
+                Some(&Filter::Lt {
+                    field: "price".into(),
+                    value: Value::F64(10.0),
+                }),
+                Some(&sort),
+                None,
+                None,
+            )
+            .unwrap();
         for r in &results {
             assert_ne!(r.id(), &target_id, "stale index entry should be skipped");
         }
@@ -2885,43 +3278,66 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         let target_id = deterministic_id(0);
         for i in 0..10u64 {
-            engine.put(make_product_with_id(deterministic_id(i), i)).unwrap();
+            engine
+                .put(make_product_with_id(deterministic_id(i), i))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
         // Trigger index creation
-        let sort = [SortField { field: "price".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "price".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert!(engine.secondary_index_count() >= 1);
 
         // Update doc 0's price to 999.99
-        engine.put(IBlob::with_id(target_id, [
-            ("type".into(), Value::String("product".into())),
-            ("name".into(), Value::String("Expensive".into())),
-            ("category".into(), Value::String("electronics".into())),
-            ("price".into(), Value::F64(999.99)),
-            ("rating".into(), Value::F64(0.0)),
-            ("stock".into(), Value::U64(0)),
-            ("description".into(), Value::String("Expensive".into())),
-        ].into())).unwrap();
+        engine
+            .put(IBlob::with_id(
+                target_id,
+                [
+                    ("type".into(), Value::String("product".into())),
+                    ("name".into(), Value::String("Expensive".into())),
+                    ("category".into(), Value::String("electronics".into())),
+                    ("price".into(), Value::F64(999.99)),
+                    ("rating".into(), Value::F64(0.0)),
+                    ("stock".into(), Value::U64(0)),
+                    ("description".into(), Value::String("Expensive".into())),
+                ]
+                .into(),
+            ))
+            .unwrap();
         engine.flush_memtable().unwrap();
 
         // Scan for expensive products — doc 0 should appear
-        let results = engine.scan(
-            Some(&Filter::Gt { field: "price".into(), value: Value::F64(500.0) }),
-            Some(&sort),
-            None,
-            None,
-        ).unwrap();
+        let results = engine
+            .scan(
+                Some(&Filter::Gt {
+                    field: "price".into(),
+                    value: Value::F64(500.0),
+                }),
+                Some(&sort),
+                None,
+                None,
+            )
+            .unwrap();
 
         let found = results.iter().any(|r| *r.id() == target_id);
-        assert!(found, "updated doc should appear in sorted scan after flush (in-memory buffer)");
+        assert!(
+            found,
+            "updated doc should appear in sorted scan after flush (in-memory buffer)"
+        );
     }
 
     #[test]
@@ -2938,7 +3354,11 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
 
         let target_id = deterministic_id(0);
@@ -2948,25 +3368,36 @@ mod tests {
 
             // Insert 10 docs and flush
             for i in 0..10u64 {
-                engine.put(make_product_with_id(deterministic_id(i), i)).unwrap();
+                engine
+                    .put(make_product_with_id(deterministic_id(i), i))
+                    .unwrap();
             }
             engine.flush_memtable().unwrap();
 
             // Trigger index creation
-            let sort = [SortField { field: "price".into(), direction: SortDirection::Ascending }];
+            let sort = [SortField {
+                field: "price".into(),
+                direction: SortDirection::Ascending,
+            }];
             engine.scan(None, Some(&sort), None, None).unwrap();
             assert!(engine.secondary_index_count() >= 1);
 
             // Update doc 0's price to 999.99
-            engine.put(IBlob::with_id(target_id, [
-                ("type".into(), Value::String("product".into())),
-                ("name".into(), Value::String("Expensive".into())),
-                ("category".into(), Value::String("electronics".into())),
-                ("price".into(), Value::F64(999.99)),
-                ("rating".into(), Value::F64(0.0)),
-                ("stock".into(), Value::U64(0)),
-                ("description".into(), Value::String("Expensive".into())),
-            ].into())).unwrap();
+            engine
+                .put(IBlob::with_id(
+                    target_id,
+                    [
+                        ("type".into(), Value::String("product".into())),
+                        ("name".into(), Value::String("Expensive".into())),
+                        ("category".into(), Value::String("electronics".into())),
+                        ("price".into(), Value::F64(999.99)),
+                        ("rating".into(), Value::F64(0.0)),
+                        ("stock".into(), Value::U64(0)),
+                        ("description".into(), Value::String("Expensive".into())),
+                    ]
+                    .into(),
+                ))
+                .unwrap();
 
             // Flush — should write both primary SSTable AND secondary index entries
             engine.flush_memtable().unwrap();
@@ -2981,12 +3412,17 @@ mod tests {
             // the new entry, not just the in-memory buffer.
 
             // For now: just verify via a full scan (no index) that the doc is there
-            let results = engine.scan(
-                Some(&Filter::Gt { field: "price".into(), value: Value::F64(500.0) }),
-                None, // no sort — bypass index
-                None,
-                None,
-            ).unwrap();
+            let results = engine
+                .scan(
+                    Some(&Filter::Gt {
+                        field: "price".into(),
+                        value: Value::F64(500.0),
+                    }),
+                    None, // no sort — bypass index
+                    None,
+                    None,
+                )
+                .unwrap();
             let found = results.iter().any(|r| *r.id() == target_id);
             assert!(found, "updated doc visible via full scan after restart");
 
@@ -3006,36 +3442,57 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         // Insert docs with categories
         for i in 0..20u64 {
             let cat = if i % 2 == 0 { "electronics" } else { "books" };
-            engine.put(IBlob::from_pairs(vec![
-                ("category", Value::String(cat.into())),
-                ("n", Value::U64(i)),
-            ])).unwrap();
+            engine
+                .put(IBlob::from_pairs(vec![
+                    ("category", Value::String(cat.into())),
+                    ("n", Value::U64(i)),
+                ]))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
         // Create index on category by doing a sorted scan
-        let sort = [SortField { field: "category".into(), direction: SortDirection::Ascending }];
+        let sort = [SortField {
+            field: "category".into(),
+            direction: SortDirection::Ascending,
+        }];
         engine.scan(None, Some(&sort), None, None).unwrap();
         assert!(engine.secondary_index_count() >= 1);
 
         // Now filter-only scan (no sort) should use the index
-        let results = engine.scan(
-            Some(&Filter::Eq { field: "category".into(), value: Value::String("electronics".into()) }),
-            None,
-            None,
-            None,
-        ).unwrap();
+        let results = engine
+            .scan(
+                Some(&Filter::Eq {
+                    field: "category".into(),
+                    value: Value::String("electronics".into()),
+                }),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
 
-        assert_eq!(results.len(), 10, "should find 10 electronics docs via index");
+        assert_eq!(
+            results.len(),
+            10,
+            "should find 10 electronics docs via index"
+        );
         for r in &results {
-            assert_eq!(r.get("category"), Some(&Value::String("electronics".into())));
+            assert_eq!(
+                r.get("category"),
+                Some(&Value::String("electronics".into()))
+            );
         }
     }
 
@@ -3052,17 +3509,23 @@ mod tests {
             scaling_parameter: 0,
             sort_spill_threshold: 5,
             compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
         };
         let engine = LsmEngine::open(config).unwrap();
 
         // Insert 20 docs: 10 electronics, 10 books
         for i in 0..20u64 {
             let cat = if i % 2 == 0 { "electronics" } else { "books" };
-            engine.put(IBlob::from_pairs(vec![
-                ("category", Value::String(cat.into())),
-                ("n", Value::U64(i)),
-            ])).unwrap();
+            engine
+                .put(IBlob::from_pairs(vec![
+                    ("category", Value::String(cat.into())),
+                    ("n", Value::U64(i)),
+                ]))
+                .unwrap();
         }
         engine.flush_memtable().unwrap();
 
@@ -3074,15 +3537,27 @@ mod tests {
             value: Value::String("electronics".into()),
         };
         engine.scan(Some(&filter), None, None, None).unwrap();
-        assert_eq!(engine.secondary_index_count(), 0, "no index after first scan");
+        assert_eq!(
+            engine.secondary_index_count(),
+            0,
+            "no index after first scan"
+        );
 
         // Second filter scan — stats show count=2, selectivity=0.5 → build index
         let results = engine.scan(Some(&filter), None, None, None).unwrap();
         assert_eq!(results.len(), 10);
-        assert_eq!(engine.secondary_index_count(), 1, "index created reactively after 2 scans");
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "index created reactively after 2 scans"
+        );
 
         // Third scan should use the index
         let results = engine.scan(Some(&filter), None, None, None).unwrap();
-        assert_eq!(results.len(), 10, "filter scan via index returns correct results");
+        assert_eq!(
+            results.len(),
+            10,
+            "filter scan via index returns correct results"
+        );
     }
 }

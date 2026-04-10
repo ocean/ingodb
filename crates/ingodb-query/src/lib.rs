@@ -88,24 +88,20 @@ impl Filter {
         match self {
             Filter::Eq { field, value } => get_field(field).as_ref() == Some(value),
 
-            Filter::Gt { field, value } => {
-                get_field(field)
-                    .as_ref()
-                    .map_or(false, |v| compare_values(v, value) == Some(std::cmp::Ordering::Greater))
-            }
+            Filter::Gt { field, value } => get_field(field).as_ref().map_or(false, |v| {
+                compare_values(v, value) == Some(std::cmp::Ordering::Greater)
+            }),
 
-            Filter::Lt { field, value } => {
-                get_field(field)
-                    .as_ref()
-                    .map_or(false, |v| compare_values(v, value) == Some(std::cmp::Ordering::Less))
-            }
+            Filter::Lt { field, value } => get_field(field).as_ref().map_or(false, |v| {
+                compare_values(v, value) == Some(std::cmp::Ordering::Less)
+            }),
 
-            Filter::Range { field, low, high } => {
-                get_field(field).as_ref().map_or(false, |v| {
-                    matches!(compare_values(v, low), Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal))
-                        && matches!(compare_values(v, high), Some(std::cmp::Ordering::Less))
-                })
-            }
+            Filter::Range { field, low, high } => get_field(field).as_ref().map_or(false, |v| {
+                matches!(
+                    compare_values(v, low),
+                    Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+                ) && matches!(compare_values(v, high), Some(std::cmp::Ordering::Less))
+            }),
 
             Filter::Exists { field } => get_field(field).is_some(),
 
@@ -184,23 +180,29 @@ mod tests {
         let fields = vec![("score".to_string(), Value::I64(75))];
         let getter = field_getter(&fields);
 
-        assert!(Filter::Gt {
-            field: "score".into(),
-            value: Value::I64(50),
-        }
-        .matches(&getter));
+        assert!(
+            Filter::Gt {
+                field: "score".into(),
+                value: Value::I64(50),
+            }
+            .matches(&getter)
+        );
 
-        assert!(!Filter::Gt {
-            field: "score".into(),
-            value: Value::I64(100),
-        }
-        .matches(&getter));
+        assert!(
+            !Filter::Gt {
+                field: "score".into(),
+                value: Value::I64(100),
+            }
+            .matches(&getter)
+        );
 
-        assert!(Filter::Lt {
-            field: "score".into(),
-            value: Value::I64(100),
-        }
-        .matches(&getter));
+        assert!(
+            Filter::Lt {
+                field: "score".into(),
+                value: Value::I64(100),
+            }
+            .matches(&getter)
+        );
     }
 
     #[test]
@@ -208,19 +210,23 @@ mod tests {
         let fields = vec![("x".to_string(), Value::U64(50))];
         let getter = field_getter(&fields);
 
-        assert!(Filter::Range {
-            field: "x".into(),
-            low: Value::U64(10),
-            high: Value::U64(100),
-        }
-        .matches(&getter));
+        assert!(
+            Filter::Range {
+                field: "x".into(),
+                low: Value::U64(10),
+                high: Value::U64(100),
+            }
+            .matches(&getter)
+        );
 
-        assert!(!Filter::Range {
-            field: "x".into(),
-            low: Value::U64(60),
-            high: Value::U64(100),
-        }
-        .matches(&getter));
+        assert!(
+            !Filter::Range {
+                field: "x".into(),
+                low: Value::U64(60),
+                high: Value::U64(100),
+            }
+            .matches(&getter)
+        );
     }
 
     #[test]
@@ -228,15 +234,19 @@ mod tests {
         let fields = vec![("present".to_string(), Value::Null)];
         let getter = field_getter(&fields);
 
-        assert!(Filter::Exists {
-            field: "present".into(),
-        }
-        .matches(&getter));
+        assert!(
+            Filter::Exists {
+                field: "present".into(),
+            }
+            .matches(&getter)
+        );
 
-        assert!(!Filter::Exists {
-            field: "absent".into(),
-        }
-        .matches(&getter));
+        assert!(
+            !Filter::Exists {
+                field: "absent".into(),
+            }
+            .matches(&getter)
+        );
     }
 
     #[test]
@@ -280,6 +290,9 @@ mod tests {
 
     #[test]
     fn test_compare_incompatible_types() {
-        assert_eq!(compare_values(&Value::I64(1), &Value::String("x".into())), None);
+        assert_eq!(
+            compare_values(&Value::I64(1), &Value::String("x".into())),
+            None
+        );
     }
 }

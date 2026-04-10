@@ -125,20 +125,34 @@ mod tests {
     #[test]
     fn test_i64_ordering() {
         let vals = [i64::MIN, -100, -1, 0, 1, 100, i64::MAX];
-        let encoded: Vec<Vec<u8>> = vals.iter().map(|n| encode_comparable_value(&Value::I64(*n))).collect();
+        let encoded: Vec<Vec<u8>> = vals
+            .iter()
+            .map(|n| encode_comparable_value(&Value::I64(*n)))
+            .collect();
         for i in 1..encoded.len() {
-            assert!(encoded[i - 1] < encoded[i],
-                "i64 order: {} should sort before {}", vals[i-1], vals[i]);
+            assert!(
+                encoded[i - 1] < encoded[i],
+                "i64 order: {} should sort before {}",
+                vals[i - 1],
+                vals[i]
+            );
         }
     }
 
     #[test]
     fn test_f64_ordering() {
         let vals = [f64::NEG_INFINITY, -1.0, 0.0, 1.0, f64::INFINITY];
-        let encoded: Vec<Vec<u8>> = vals.iter().map(|n| encode_comparable_value(&Value::F64(*n))).collect();
+        let encoded: Vec<Vec<u8>> = vals
+            .iter()
+            .map(|n| encode_comparable_value(&Value::F64(*n)))
+            .collect();
         for i in 1..encoded.len() {
-            assert!(encoded[i - 1] < encoded[i],
-                "f64 order: {} should sort before {}", vals[i-1], vals[i]);
+            assert!(
+                encoded[i - 1] < encoded[i],
+                "f64 order: {} should sort before {}",
+                vals[i - 1],
+                vals[i]
+            );
         }
     }
 
@@ -155,18 +169,9 @@ mod tests {
     #[test]
     fn test_field_key_multi_field() {
         let extractor = FieldKeyExtractor::new(vec!["a".into(), "b".into()]);
-        let blob1 = IBlob::from_pairs(vec![
-            ("a", Value::String("x".into())),
-            ("b", Value::U64(1)),
-        ]);
-        let blob2 = IBlob::from_pairs(vec![
-            ("a", Value::String("x".into())),
-            ("b", Value::U64(2)),
-        ]);
-        let blob3 = IBlob::from_pairs(vec![
-            ("a", Value::String("y".into())),
-            ("b", Value::U64(0)),
-        ]);
+        let blob1 = IBlob::from_pairs(vec![("a", Value::String("x".into())), ("b", Value::U64(1))]);
+        let blob2 = IBlob::from_pairs(vec![("a", Value::String("x".into())), ("b", Value::U64(2))]);
+        let blob3 = IBlob::from_pairs(vec![("a", Value::String("y".into())), ("b", Value::U64(0))]);
         let k1 = extractor.extract_key(&blob1);
         let k2 = extractor.extract_key(&blob2);
         let k3 = extractor.extract_key(&blob3);

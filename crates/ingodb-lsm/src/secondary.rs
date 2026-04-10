@@ -1,6 +1,8 @@
 use ingodb_blob::{DocumentId, IBlob, Value};
 use ingodb_query::Filter;
-use ingodb_sstable::{encode_comparable_value, FieldKeyExtractor, KeyExtractor, SSTableReader, SSTableWriter};
+use ingodb_sstable::{
+    FieldKeyExtractor, KeyExtractor, SSTableReader, SSTableWriter, encode_comparable_value,
+};
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -62,7 +64,11 @@ impl SecondaryIndex {
         }
 
         // Dedup by _id, keep highest _version
-        all.sort_by(|a, b| a.id().cmp(b.id()).then_with(|| b.version().cmp(a.version())));
+        all.sort_by(|a, b| {
+            a.id()
+                .cmp(b.id())
+                .then_with(|| b.version().cmp(a.version()))
+        });
         all.dedup_by(|a, b| a.id() == b.id());
 
         // Skip tombstones and project to indexed fields
@@ -79,8 +85,11 @@ impl SecondaryIndex {
         // Write SSTable sorted by field values
         let extractor = FieldKeyExtractor::new(fields.to_vec());
         let output_path = output_path.as_ref().to_path_buf();
-        SSTableWriter::with_block_size(block_size)
-            .write(&output_path, &mut projected, &extractor)?;
+        SSTableWriter::with_block_size(block_size).write(
+            &output_path,
+            &mut projected,
+            &extractor,
+        )?;
 
         let reader = SSTableReader::open(&output_path)?;
         Ok(SecondaryIndex {
@@ -115,8 +124,11 @@ impl SecondaryIndex {
 
         let extractor = FieldKeyExtractor::new(fields.to_vec());
         let output_path = output_path.as_ref().to_path_buf();
-        SSTableWriter::with_block_size(block_size)
-            .write(&output_path, &mut projected, &extractor)?;
+        SSTableWriter::with_block_size(block_size).write(
+            &output_path,
+            &mut projected,
+            &extractor,
+        )?;
 
         let reader = SSTableReader::open(&output_path)?;
         Ok(SecondaryIndex {
@@ -131,7 +143,11 @@ impl SecondaryIndex {
     }
 
     /// Open an existing secondary index from disk.
-    pub fn open(fields: Vec<String>, range: Option<Filter>, path: impl AsRef<Path>) -> Result<Self, LsmError> {
+    pub fn open(
+        fields: Vec<String>,
+        range: Option<Filter>,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, LsmError> {
         let path = path.as_ref().to_path_buf();
         let reader = SSTableReader::open(&path)?;
         Ok(SecondaryIndex {
@@ -219,7 +235,10 @@ impl SecondaryIndex {
         // Sort merged results
         all.sort_by(|a, b| a.0.cmp(&b.0));
 
-        Ok(all.into_iter().map(|(_, blob)| (*blob.id(), blob)).collect())
+        Ok(all
+            .into_iter()
+            .map(|(_, blob)| (*blob.id(), blob))
+            .collect())
     }
 
     /// Check if this index covers the given sort fields AND the query filter.
@@ -230,8 +249,8 @@ impl SecondaryIndex {
             return false;
         }
         match (&self.range, query_filter) {
-            (None, _) => true,           // full range covers everything
-            (Some(_), None) => false,     // partial index can't serve unfiltered scan
+            (None, _) => true,                              // full range covers everything
+            (Some(_), None) => false, // partial index can't serve unfiltered scan
             (Some(idx_range), Some(qf)) => idx_range == qf, // exact match
         }
     }
@@ -319,14 +338,20 @@ impl SecondaryIndex {
             all.extend(sst.iter()?.into_iter().map(|(_, blob)| blob));
         }
 
-        all.sort_by(|a, b| a.id().cmp(b.id()).then_with(|| b.version().cmp(a.version())));
+        all.sort_by(|a, b| {
+            a.id()
+                .cmp(b.id())
+                .then_with(|| b.version().cmp(a.version()))
+        });
         all.dedup_by(|a, b| a.id() == b.id());
 
         let mut projected: Vec<IBlob> = all
             .into_iter()
             .filter(|blob| !blob.is_deleted())
             .filter(|blob| {
-                range.as_ref().map_or(true, |f| f.matches(&|field| blob.get_field(field)))
+                range
+                    .as_ref()
+                    .map_or(true, |f| f.matches(&|field| blob.get_field(field)))
             })
             .map(|blob| blob.project(&self.fields))
             .collect();
@@ -337,8 +362,7 @@ impl SecondaryIndex {
 
         let extractor = FieldKeyExtractor::new(self.fields.clone());
         let tmp_path = self.path.with_extension("sst.tmp");
-        SSTableWriter::with_block_size(block_size)
-            .write(&tmp_path, &mut projected, &extractor)?;
+        SSTableWriter::with_block_size(block_size).write(&tmp_path, &mut projected, &extractor)?;
 
         std::fs::rename(&tmp_path, &self.path)?;
         self.reader = SSTableReader::open(&self.path)?;
@@ -374,8 +398,7 @@ impl SecondaryIndex {
 
         let extractor = FieldKeyExtractor::new(self.fields.clone());
         let tmp_path = self.path.with_extension("sst.tmp");
-        SSTableWriter::with_block_size(block_size)
-            .write(&tmp_path, &mut blobs, &extractor)?;
+        SSTableWriter::with_block_size(block_size).write(&tmp_path, &mut blobs, &extractor)?;
 
         std::fs::rename(&tmp_path, &self.path)?;
         self.reader = SSTableReader::open(&self.path)?;
@@ -408,7 +431,9 @@ mod tests {
 
     fn make_primary_sst(dir: &Path, blobs: &mut [IBlob]) -> SSTableReader {
         let path = dir.join(format!("{}.sst", blobs[0].id()));
-        SSTableWriter::new().write(&path, blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, blobs, &IdKeyExtractor)
+            .unwrap();
         SSTableReader::open(&path).unwrap()
     }
 
@@ -416,9 +441,18 @@ mod tests {
     fn test_build_secondary_index() {
         let dir = tempfile::tempdir().unwrap();
         let mut blobs = vec![
-            IBlob::from_pairs(vec![("name", Value::String("Charlie".into())), ("age", Value::U64(30))]),
-            IBlob::from_pairs(vec![("name", Value::String("Alice".into())), ("age", Value::U64(25))]),
-            IBlob::from_pairs(vec![("name", Value::String("Bob".into())), ("age", Value::U64(35))]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Charlie".into())),
+                ("age", Value::U64(30)),
+            ]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Alice".into())),
+                ("age", Value::U64(25)),
+            ]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Bob".into())),
+                ("age", Value::U64(35)),
+            ]),
         ];
         // Stamp versions (normally done by engine)
         for blob in &mut blobs {
@@ -428,23 +462,22 @@ mod tests {
         let primary = make_primary_sst(dir.path(), &mut blobs);
         let idx_path = dir.path().join("idx_name.sst");
 
-        let index = SecondaryIndex::build(
-            &["name".into()],
-            &[&primary],
-            &idx_path,
-            4096,
-        ).unwrap();
+        let index = SecondaryIndex::build(&["name".into()], &[&primary], &idx_path, 4096).unwrap();
 
         // Iterate — should be sorted by name
         let sorted = index.iter_sorted().unwrap();
-        let names: Vec<_> = sorted.iter()
+        let names: Vec<_> = sorted
+            .iter()
             .filter_map(|(_, blob)| blob.get("name").cloned())
             .collect();
-        assert_eq!(names, vec![
-            Value::String("Alice".into()),
-            Value::String("Bob".into()),
-            Value::String("Charlie".into()),
-        ]);
+        assert_eq!(
+            names,
+            vec![
+                Value::String("Alice".into()),
+                Value::String("Bob".into()),
+                Value::String("Charlie".into()),
+            ]
+        );
     }
 
     #[test]
@@ -460,12 +493,7 @@ mod tests {
         let primary = make_primary_sst(dir.path(), &mut blobs);
         let idx_path = dir.path().join("idx_name.sst");
 
-        let index = SecondaryIndex::build(
-            &["name".into()],
-            &[&primary],
-            &idx_path,
-            4096,
-        ).unwrap();
+        let index = SecondaryIndex::build(&["name".into()], &[&primary], &idx_path, 4096).unwrap();
 
         let sorted = index.iter_sorted().unwrap();
         assert_eq!(sorted.len(), 1, "tombstone should be excluded from index");
@@ -474,9 +502,7 @@ mod tests {
     #[test]
     fn test_index_matches_sort() {
         let dir = tempfile::tempdir().unwrap();
-        let mut blobs = vec![
-            IBlob::from_pairs(vec![("name", Value::String("A".into()))]),
-        ];
+        let mut blobs = vec![IBlob::from_pairs(vec![("name", Value::String("A".into()))])];
         blobs[0].set_version(DocumentId::new());
         let primary = make_primary_sst(dir.path(), &mut blobs);
 
@@ -485,7 +511,8 @@ mod tests {
             &[&primary],
             dir.path().join("idx.sst"),
             4096,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(index.matches_sort(&["name".into()]));
         assert!(!index.matches_sort(&["age".into()]));
@@ -495,9 +522,7 @@ mod tests {
     #[test]
     fn test_index_open_existing() {
         let dir = tempfile::tempdir().unwrap();
-        let mut blobs = vec![
-            IBlob::from_pairs(vec![("x", Value::U64(1))]),
-        ];
+        let mut blobs = vec![IBlob::from_pairs(vec![("x", Value::U64(1))])];
         blobs[0].set_version(DocumentId::new());
         let primary = make_primary_sst(dir.path(), &mut blobs);
         let idx_path = dir.path().join("idx.sst");
@@ -513,7 +538,7 @@ mod tests {
     fn test_should_full_rebuild_threshold() {
         // N=1000, ln(1000) ≈ 6.9, 0.5 * 1000 * 6.9 ≈ 3453
         assert!(!should_full_rebuild(3000, 1000)); // below threshold
-        assert!(should_full_rebuild(4000, 1000));  // above threshold
+        assert!(should_full_rebuild(4000, 1000)); // above threshold
 
         // N=0 → always rebuild
         assert!(should_full_rebuild(1, 0));
@@ -530,13 +555,13 @@ mod tests {
             IBlob::from_pairs(vec![("x", Value::U64(1))]),
             IBlob::from_pairs(vec![("x", Value::U64(3))]),
         ];
-        for b in &mut blobs { b.set_version(DocumentId::new()); }
+        for b in &mut blobs {
+            b.set_version(DocumentId::new());
+        }
         let primary = make_primary_sst(dir.path(), &mut blobs);
         let idx_path = dir.path().join("idx.sst");
 
-        let mut index = SecondaryIndex::build(
-            &["x".into()], &[&primary], &idx_path, 4096,
-        ).unwrap();
+        let mut index = SecondaryIndex::build(&["x".into()], &[&primary], &idx_path, 4096).unwrap();
         assert_eq!(index.entry_count(), 2);
 
         // Add buffer entry
@@ -559,16 +584,12 @@ mod tests {
     #[test]
     fn test_full_rebuild_compaction() {
         let dir = tempfile::tempdir().unwrap();
-        let mut blobs = vec![
-            IBlob::from_pairs(vec![("x", Value::U64(1))]),
-        ];
+        let mut blobs = vec![IBlob::from_pairs(vec![("x", Value::U64(1))])];
         blobs[0].set_version(DocumentId::new());
         let primary = make_primary_sst(dir.path(), &mut blobs);
         let idx_path = dir.path().join("idx.sst");
 
-        let mut index = SecondaryIndex::build(
-            &["x".into()], &[&primary], &idx_path, 4096,
-        ).unwrap();
+        let mut index = SecondaryIndex::build(&["x".into()], &[&primary], &idx_path, 4096).unwrap();
 
         // Add many buffer entries to bloat the index (simulating many updates)
         for i in 0..20u64 {
@@ -601,11 +622,13 @@ mod tests {
         let idx_path = dir.path().join("idx.sst");
 
         // Build partial index with 6 out of 10 entries (60% > 50%)
-        let filter = Filter::Lt { field: "x".into(), value: Value::U64(6) };
-        let mut partial_blobs: Vec<IBlob> = blobs.iter()
-            .filter(|b| {
-                filter.matches(&|f| b.get_field(f))
-            })
+        let filter = Filter::Lt {
+            field: "x".into(),
+            value: Value::U64(6),
+        };
+        let mut partial_blobs: Vec<IBlob> = blobs
+            .iter()
+            .filter(|b| filter.matches(&|f| b.get_field(f)))
             .cloned()
             .collect();
 
@@ -615,7 +638,8 @@ mod tests {
             &mut partial_blobs,
             &idx_path,
             4096,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(index.range.is_some(), "starts as partial");
         assert_eq!(index.entry_count(), 6);
 
@@ -649,8 +673,12 @@ mod tests {
         let idx_path = dir.path().join("idx.sst");
 
         // Build partial index with only 3 out of 100 entries (3%)
-        let filter = Filter::Lt { field: "x".into(), value: Value::U64(3) };
-        let mut partial_blobs: Vec<IBlob> = blobs.iter()
+        let filter = Filter::Lt {
+            field: "x".into(),
+            value: Value::U64(3),
+        };
+        let mut partial_blobs: Vec<IBlob> = blobs
+            .iter()
             .filter(|b| filter.matches(&|f| b.get_field(f)))
             .cloned()
             .collect();
@@ -661,7 +689,8 @@ mod tests {
             &mut partial_blobs,
             &idx_path,
             4096,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Add buffer entries to trigger rebuild
         for i in 0..50u64 {
@@ -685,15 +714,13 @@ mod tests {
     #[test]
     fn test_should_drop_unused() {
         let dir = tempfile::tempdir().unwrap();
-        let mut blobs = vec![
-            IBlob::from_pairs(vec![("x", Value::U64(1))]),
-        ];
+        let mut blobs = vec![IBlob::from_pairs(vec![("x", Value::U64(1))])];
         blobs[0].set_version(DocumentId::new());
         let primary = make_primary_sst(dir.path(), &mut blobs);
 
-        let index = SecondaryIndex::build(
-            &["x".into()], &[&primary], dir.path().join("idx.sst"), 4096,
-        ).unwrap();
+        let index =
+            SecondaryIndex::build(&["x".into()], &[&primary], dir.path().join("idx.sst"), 4096)
+                .unwrap();
 
         // Fresh index should not be dropped
         assert!(!index.should_drop());
@@ -702,7 +729,10 @@ mod tests {
         for _ in 0..DROP_COMPACTION_CYCLES + 1 {
             index.mark_compaction();
         }
-        assert!(!index.should_drop(), "recently used — don't drop despite many compactions");
+        assert!(
+            !index.should_drop(),
+            "recently used — don't drop despite many compactions"
+        );
 
         // Note: can't easily test the time-based drop in a unit test without
         // mocking time. The important thing is both conditions must be met.

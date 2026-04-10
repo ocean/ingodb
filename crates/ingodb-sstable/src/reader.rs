@@ -82,7 +82,11 @@ impl SSTableReader {
             pos += 8;
             let size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
             pos += 4;
-            block_indices.push(BlockIndex { last_key, offset, size });
+            block_indices.push(BlockIndex {
+                last_key,
+                offset,
+                size,
+            });
         }
 
         if block_indices.is_empty() {
@@ -119,7 +123,9 @@ impl SSTableReader {
         let compressed = &block_data[4..];
         let computed_crc = crc32fast::hash(compressed);
         if stored_crc != computed_crc {
-            return Err(SSTableError::CrcMismatch { offset: block.offset });
+            return Err(SSTableError::CrcMismatch {
+                offset: block.offset,
+            });
         }
 
         let decompressed = lz4_flex::decompress_size_prepended(compressed)
@@ -220,7 +226,11 @@ impl SSTableReader {
 
     /// Find the latest version of a document at a given snapshot.
     /// Returns the highest version <= snapshot for the given _id.
-    pub fn get_by_id_at(&self, id: &DocumentId, snapshot: &DocumentId) -> Result<Option<IBlob>, SSTableError> {
+    pub fn get_by_id_at(
+        &self,
+        id: &DocumentId,
+        snapshot: &DocumentId,
+    ) -> Result<Option<IBlob>, SSTableError> {
         let mut mvcc_key = Vec::with_capacity(32);
         mvcc_key.extend_from_slice(id.as_bytes());
         mvcc_key.extend_from_slice(snapshot.as_bytes());
@@ -229,7 +239,11 @@ impl SSTableReader {
 
     /// Find the latest entry whose key starts with `prefix` and is <= `max_key`.
     /// Used for MVCC lookups where the key is (_id, _version).
-    fn get_latest_by_prefix(&self, prefix: &[u8], max_key: &[u8]) -> Result<Option<IBlob>, SSTableError> {
+    fn get_latest_by_prefix(
+        &self,
+        prefix: &[u8],
+        max_key: &[u8],
+    ) -> Result<Option<IBlob>, SSTableError> {
         // Check bloom filter with the _id prefix (inserted at write time for MVCC keys)
         if !self.bloom.may_contain(prefix) {
             return Ok(None);
@@ -298,7 +312,11 @@ impl SSTableReader {
 
     /// Range scan: return all entries with keys in [start_key, end_key].
     /// Both bounds are inclusive. Keys are compared lexicographically.
-    pub fn range_scan(&self, start_key: &[u8], end_key: &[u8]) -> Result<Vec<(Vec<u8>, IBlob)>, SSTableError> {
+    pub fn range_scan(
+        &self,
+        start_key: &[u8],
+        end_key: &[u8],
+    ) -> Result<Vec<(Vec<u8>, IBlob)>, SSTableError> {
         // Find the first block that could contain start_key.
         // Binary search finds a block with last_key >= start_key, but entries
         // with the same key could span multiple blocks. Walk backward to find
@@ -390,8 +408,7 @@ impl SSTableReader {
             .map_err(|e| SSTableError::Corrupted(format!("LZ4 decompress failed: {e}")))?;
 
         // Parse entries: [entry_count:4][key_len:2][key_bytes][blob_len:4][blob_bytes]...
-        let entry_count =
-            u32::from_le_bytes(decompressed[0..4].try_into().unwrap()) as usize;
+        let entry_count = u32::from_le_bytes(decompressed[0..4].try_into().unwrap()) as usize;
         let mut entries = Vec::with_capacity(entry_count);
         let mut pos = 4;
 
@@ -399,7 +416,8 @@ impl SSTableReader {
             if pos + 2 > decompressed.len() {
                 return Err(SSTableError::Corrupted("truncated key_len in block".into()));
             }
-            let key_len = u16::from_le_bytes(decompressed[pos..pos + 2].try_into().unwrap()) as usize;
+            let key_len =
+                u16::from_le_bytes(decompressed[pos..pos + 2].try_into().unwrap()) as usize;
             pos += 2;
 
             if pos + key_len > decompressed.len() {
@@ -409,7 +427,9 @@ impl SSTableReader {
             pos += key_len;
 
             if pos + 4 > decompressed.len() {
-                return Err(SSTableError::Corrupted("truncated blob_len in block".into()));
+                return Err(SSTableError::Corrupted(
+                    "truncated blob_len in block".into(),
+                ));
             }
             let blob_len =
                 u32::from_le_bytes(decompressed[pos..pos + 4].try_into().unwrap()) as usize;

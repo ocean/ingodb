@@ -1,14 +1,16 @@
-mod writer;
-mod reader;
 mod bloom;
 mod error;
 mod keys;
+mod reader;
+mod writer;
 
-pub use writer::SSTableWriter;
-pub use reader::SSTableReader;
 pub use bloom::BloomFilter;
 pub use error::SSTableError;
-pub use keys::{encode_comparable_value, IdKeyExtractor, FieldKeyExtractor, MvccKeyExtractor, KeyExtractor};
+pub use keys::{
+    FieldKeyExtractor, IdKeyExtractor, KeyExtractor, MvccKeyExtractor, encode_comparable_value,
+};
+pub use reader::SSTableReader;
+pub use writer::SSTableWriter;
 
 /// SSTable file magic: "ISST"
 pub const SSTABLE_MAGIC: [u8; 4] = *b"ISST";
@@ -46,7 +48,9 @@ mod tests {
         let mut blobs = make_entries(100);
         let extractor = IdKeyExtractor;
 
-        SSTableWriter::new().write(&path, &mut blobs, &extractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &extractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         // Verify all entries can be looked up by _id
@@ -68,7 +72,9 @@ mod tests {
         let path = dir.path().join("iter.sst");
 
         let mut blobs = make_entries(50);
-        SSTableWriter::new().write(&path, &mut blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &IdKeyExtractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         let all = reader.iter().unwrap();
@@ -87,7 +93,9 @@ mod tests {
 
         let mut blobs = make_entries(20);
 
-        SSTableWriter::with_block_size(128).write(&path, &mut blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::with_block_size(128)
+            .write(&path, &mut blobs, &IdKeyExtractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         assert!(reader.block_count() > 1, "expected multiple blocks");
@@ -105,7 +113,9 @@ mod tests {
         let path = dir.path().join("single.sst");
 
         let mut blobs = make_entries(1);
-        SSTableWriter::new().write(&path, &mut blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &IdKeyExtractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         let key = IdKeyExtractor.extract_key(&blobs[0]);
@@ -119,7 +129,9 @@ mod tests {
         let path = dir.path().join("minmax.sst");
 
         let mut blobs = make_entries(50);
-        SSTableWriter::new().write(&path, &mut blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &IdKeyExtractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         let all = reader.iter().unwrap();
@@ -133,7 +145,9 @@ mod tests {
         let path = dir.path().join("minmax1.sst");
 
         let mut blobs = make_entries(1);
-        SSTableWriter::new().write(&path, &mut blobs, &IdKeyExtractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &IdKeyExtractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         assert_eq!(reader.min_key(), reader.max_key());
@@ -145,25 +159,40 @@ mod tests {
         let path = dir.path().join("field_sort.sst");
 
         let mut blobs = vec![
-            IBlob::from_pairs(vec![("name", Value::String("Charlie".into())), ("age", Value::U64(30))]),
-            IBlob::from_pairs(vec![("name", Value::String("Alice".into())), ("age", Value::U64(25))]),
-            IBlob::from_pairs(vec![("name", Value::String("Bob".into())), ("age", Value::U64(35))]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Charlie".into())),
+                ("age", Value::U64(30)),
+            ]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Alice".into())),
+                ("age", Value::U64(25)),
+            ]),
+            IBlob::from_pairs(vec![
+                ("name", Value::String("Bob".into())),
+                ("age", Value::U64(35)),
+            ]),
         ];
 
         let extractor = FieldKeyExtractor::new(vec!["name".into()]);
-        SSTableWriter::new().write(&path, &mut blobs, &extractor).unwrap();
+        SSTableWriter::new()
+            .write(&path, &mut blobs, &extractor)
+            .unwrap();
         let reader = SSTableReader::open(&path).unwrap();
 
         // Iterate — should be sorted by name
         let all = reader.iter().unwrap();
-        let names: Vec<_> = all.iter()
+        let names: Vec<_> = all
+            .iter()
             .map(|(_, blob)| blob.get("name").cloned())
             .collect();
-        assert_eq!(names, vec![
-            Some(Value::String("Alice".into())),
-            Some(Value::String("Bob".into())),
-            Some(Value::String("Charlie".into())),
-        ]);
+        assert_eq!(
+            names,
+            vec![
+                Some(Value::String("Alice".into())),
+                Some(Value::String("Bob".into())),
+                Some(Value::String("Charlie".into())),
+            ]
+        );
 
         // Point lookup by key
         let alice_key = encode_comparable_value(&Value::String("Alice".into()));
@@ -183,8 +212,12 @@ mod tests {
         ];
         let encoded: Vec<Vec<u8>> = vals.iter().map(encode_comparable_value).collect();
         for i in 1..encoded.len() {
-            assert!(encoded[i - 1] < encoded[i],
-                "encoding should preserve order: {:?} < {:?}", vals[i-1], vals[i]);
+            assert!(
+                encoded[i - 1] < encoded[i],
+                "encoding should preserve order: {:?} < {:?}",
+                vals[i - 1],
+                vals[i]
+            );
         }
 
         let strings = vec![
@@ -195,8 +228,12 @@ mod tests {
         ];
         let encoded: Vec<Vec<u8>> = strings.iter().map(encode_comparable_value).collect();
         for i in 1..encoded.len() {
-            assert!(encoded[i - 1] < encoded[i],
-                "string encoding should preserve order: {:?} < {:?}", strings[i-1], strings[i]);
+            assert!(
+                encoded[i - 1] < encoded[i],
+                "string encoding should preserve order: {:?} < {:?}",
+                strings[i - 1],
+                strings[i]
+            );
         }
     }
 }

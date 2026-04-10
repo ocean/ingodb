@@ -172,8 +172,7 @@ impl Value {
                 let mut total = 5; // tag + count
                 for _ in 0..count {
                     check_len(buf, pos, 4)?;
-                    let klen =
-                        u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
+                    let klen = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
                     pos += 4;
                     total += 4;
                     check_len(buf, pos, klen)?;

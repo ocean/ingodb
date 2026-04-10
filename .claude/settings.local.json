@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(git --no-pager stash show -p)",
+      "Bash(git checkout:*)",
+      "Bash(cargo fmt:*)"
+    ]
+  }
+}

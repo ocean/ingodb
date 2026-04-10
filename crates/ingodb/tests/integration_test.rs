@@ -1,4 +1,4 @@
-use ingodb::{Database, DocumentId, IBlob, LsmConfig, LsmEngine, Value, Filter, Query};
+use ingodb::{Database, DocumentId, Filter, IBlob, LsmConfig, LsmEngine, Query, Value};
 
 fn make_user(name: &str, age: u64) -> IBlob {
     IBlob::from_pairs(vec![
@@ -25,8 +25,12 @@ fn test_engine() -> (LsmEngine, tempfile::TempDir) {
         compaction_threshold: 4,
         scaling_parameter: 0,
         sort_spill_threshold: 5,
-            compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        compaction_threads: 1,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
     let engine = LsmEngine::open(config).unwrap();
     (engine, dir)
@@ -51,7 +55,10 @@ fn test_document_lifecycle() {
 
     // Retrieve and verify
     let found_user = engine.get(&user_id).unwrap().unwrap();
-    assert_eq!(found_user.get("name"), Some(&Value::String("Henrik".into())));
+    assert_eq!(
+        found_user.get("name"),
+        Some(&Value::String("Henrik".into()))
+    );
     assert!(!found_user.version().is_nil(), "version should be stamped");
 
     let found_order = engine.get(&order1_id).unwrap().unwrap();
@@ -97,18 +104,26 @@ fn test_upsert() {
     let (engine, _dir) = test_engine();
 
     let id = DocumentId::new();
-    let blob1 = IBlob::with_id(id, [
-        ("name".into(), Value::String("Henrik".into())),
-        ("age".into(), Value::U64(42)),
-    ].into());
+    let blob1 = IBlob::with_id(
+        id,
+        [
+            ("name".into(), Value::String("Henrik".into())),
+            ("age".into(), Value::U64(42)),
+        ]
+        .into(),
+    );
     engine.put(blob1).unwrap();
     let v1 = *engine.get(&id).unwrap().unwrap().version();
 
     // Update: same _id, different content
-    let blob2 = IBlob::with_id(id, [
-        ("name".into(), Value::String("Henrik".into())),
-        ("age".into(), Value::U64(43)),
-    ].into());
+    let blob2 = IBlob::with_id(
+        id,
+        [
+            ("name".into(), Value::String("Henrik".into())),
+            ("age".into(), Value::U64(43)),
+        ]
+        .into(),
+    );
     engine.put(blob2).unwrap();
 
     let found = engine.get(&id).unwrap().unwrap();
@@ -141,8 +156,12 @@ fn test_survive_restart() {
         compaction_threshold: 4,
         scaling_parameter: 0,
         sort_spill_threshold: 5,
-            compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        compaction_threads: 1,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
 
     let user = make_user("Persistent", 99);
@@ -157,10 +176,7 @@ fn test_survive_restart() {
     {
         let engine = LsmEngine::open(config).unwrap();
         let found = engine.get(&id).unwrap().unwrap();
-        assert_eq!(
-            found.get("name"),
-            Some(&Value::String("Persistent".into()))
-        );
+        assert_eq!(found.get("name"), Some(&Value::String("Persistent".into())));
         assert!(!found.version().is_nil(), "version survives restart");
     }
 }
@@ -175,8 +191,12 @@ fn test_flush_and_recover_from_sstable() {
         compaction_threshold: 4,
         scaling_parameter: 0,
         sort_spill_threshold: 5,
-            compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        compaction_threads: 1,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
 
     let mut ids = Vec::new();
@@ -320,8 +340,12 @@ fn test_delete_survives_restart() {
         compaction_threshold: 100,
         scaling_parameter: 0,
         sort_spill_threshold: 5,
-            compaction_threads: 1,
-            adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        compaction_threads: 1,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
 
     let user = make_user("RestartDelete", 40);
@@ -336,7 +360,10 @@ fn test_delete_survives_restart() {
 
     {
         let engine = LsmEngine::open(config).unwrap();
-        assert!(engine.get(&id).unwrap().is_none(), "delete survives restart");
+        assert!(
+            engine.get(&id).unwrap().is_none(),
+            "delete survives restart"
+        );
     }
 }
 
@@ -362,14 +389,21 @@ fn test_delete_with_graph_ref_stable() {
     assert_eq!(found_order.get("user"), Some(&Value::Uuid(user_id)));
 
     // Re-insert user — order's ref resolves again
-    let user2 = IBlob::with_id(user_id, [
-        ("type".into(), Value::String("user".into())),
-        ("name".into(), Value::String("Henrik v2".into())),
-        ("age".into(), Value::U64(43)),
-    ].into());
+    let user2 = IBlob::with_id(
+        user_id,
+        [
+            ("type".into(), Value::String("user".into())),
+            ("name".into(), Value::String("Henrik v2".into())),
+            ("age".into(), Value::U64(43)),
+        ]
+        .into(),
+    );
     engine.put(user2).unwrap();
     let found_user = engine.get(&user_id).unwrap().unwrap();
-    assert_eq!(found_user.get("name"), Some(&Value::String("Henrik v2".into())));
+    assert_eq!(
+        found_user.get("name"),
+        Some(&Value::String("Henrik v2".into()))
+    );
 }
 
 #[test]
@@ -381,7 +415,10 @@ fn test_execute_get_query() {
 
     let results = engine.execute(&Query::Get { id }).unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get("name"), Some(&Value::String("Henrik".into())));
+    assert_eq!(
+        results[0].get("name"),
+        Some(&Value::String("Henrik".into()))
+    );
 }
 
 #[test]
@@ -392,12 +429,17 @@ fn test_execute_scan_with_filter() {
     engine.put(make_user("Charlie", 45)).unwrap();
 
     // Find users older than 30
-    let results = engine.execute(&Query::Scan {
-        filter: Some(Filter::Gt { field: "age".into(), value: Value::U64(30) }),
-        sort: None,
-        project: None,
-        limit: None,
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: Some(Filter::Gt {
+                field: "age".into(),
+                value: Value::U64(30),
+            }),
+            sort: None,
+            project: None,
+            limit: None,
+        })
+        .unwrap();
     assert_eq!(results.len(), 2);
     for r in &results {
         if let Some(Value::U64(age)) = r.get("age") {
@@ -412,12 +454,14 @@ fn test_execute_scan_with_projection() {
     engine.put(make_user("Henrik", 42)).unwrap();
     engine.put(make_user("Alice", 30)).unwrap();
 
-    let results = engine.execute(&Query::Scan {
-        filter: None,
-        sort: None,
-        project: Some(vec!["name".into()]),
-        limit: None,
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: None,
+            sort: None,
+            project: Some(vec!["name".into()]),
+            limit: None,
+        })
+        .unwrap();
     assert_eq!(results.len(), 2);
     for r in &results {
         assert!(r.is_projection());
@@ -434,12 +478,14 @@ fn test_execute_scan_with_limit() {
     for i in 0..10 {
         engine.put(make_user(&format!("User{i}"), i)).unwrap();
     }
-    let results = engine.execute(&Query::Scan {
-        filter: None,
-        sort: None,
-        project: None,
-        limit: Some(3),
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: None,
+            sort: None,
+            project: None,
+            limit: Some(3),
+        })
+        .unwrap();
     assert_eq!(results.len(), 3);
 }
 
@@ -477,16 +523,24 @@ fn test_traverse_orders_to_users() {
     engine.put(make_order(user2_id, 50)).unwrap();
 
     // Find users referenced by orders over 75
-    let results = engine.execute(&Query::Traverse {
-        start: Some(Filter::Gt { field: "amount".into(), value: Value::U64(75) }),
-        from_field: "user".into(),
-        to_field: "_id".into(),
-        depth: 1,
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Traverse {
+            start: Some(Filter::Gt {
+                field: "amount".into(),
+                value: Value::U64(75),
+            }),
+            from_field: "user".into(),
+            to_field: "_id".into(),
+            depth: 1,
+        })
+        .unwrap();
 
     // Orders over 75: two orders for Henrik (100, 200). Should find Henrik (deduplicated).
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get("name"), Some(&Value::String("Henrik".into())));
+    assert_eq!(
+        results[0].get("name"),
+        Some(&Value::String("Henrik".into()))
+    );
 }
 
 #[test]
@@ -497,31 +551,46 @@ fn test_traverse_join_by_name() {
     engine.put(make_user("Henrik", 42)).unwrap();
     engine.put(make_user("Alice", 30)).unwrap();
 
-    engine.put(IBlob::from_pairs(vec![
-        ("type", Value::String("review".into())),
-        ("author", Value::String("Henrik".into())),
-        ("text", Value::String("Great product".into())),
-    ])).unwrap();
+    engine
+        .put(IBlob::from_pairs(vec![
+            ("type", Value::String("review".into())),
+            ("author", Value::String("Henrik".into())),
+            ("text", Value::String("Great product".into())),
+        ]))
+        .unwrap();
 
-    engine.put(IBlob::from_pairs(vec![
-        ("type", Value::String("review".into())),
-        ("author", Value::String("Alice".into())),
-        ("text", Value::String("Not bad".into())),
-    ])).unwrap();
+    engine
+        .put(IBlob::from_pairs(vec![
+            ("type", Value::String("review".into())),
+            ("author", Value::String("Alice".into())),
+            ("text", Value::String("Not bad".into())),
+        ]))
+        .unwrap();
 
     // From Henrik's user doc, find reviews by joining name -> author
-    let results = engine.execute(&Query::Traverse {
-        start: Some(Filter::And(vec![
-            Filter::Eq { field: "type".into(), value: Value::String("user".into()) },
-            Filter::Eq { field: "name".into(), value: Value::String("Henrik".into()) },
-        ])),
-        from_field: "name".into(),
-        to_field: "author".into(),
-        depth: 1,
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Traverse {
+            start: Some(Filter::And(vec![
+                Filter::Eq {
+                    field: "type".into(),
+                    value: Value::String("user".into()),
+                },
+                Filter::Eq {
+                    field: "name".into(),
+                    value: Value::String("Henrik".into()),
+                },
+            ])),
+            from_field: "name".into(),
+            to_field: "author".into(),
+            depth: 1,
+        })
+        .unwrap();
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get("text"), Some(&Value::String("Great product".into())));
+    assert_eq!(
+        results[0].get("text"),
+        Some(&Value::String("Great product".into()))
+    );
 }
 
 #[test]
@@ -533,28 +602,40 @@ fn test_query_stats_recorded() {
 
     // Run a filtered scan several times
     for _ in 0..5 {
-        engine.execute(&Query::Scan {
-            filter: Some(Filter::Gt { field: "age".into(), value: Value::U64(15) }),
-            sort: None,
-            project: None,
-            limit: None,
-        }).unwrap();
+        engine
+            .execute(&Query::Scan {
+                filter: Some(Filter::Gt {
+                    field: "age".into(),
+                    value: Value::U64(15),
+                }),
+                sort: None,
+                project: None,
+                limit: None,
+            })
+            .unwrap();
     }
 
     let stats = engine.query_stats().all_patterns();
     // Should have at least one "scan" pattern
-    let scan_stats: Vec<_> = stats.iter()
+    let scan_stats: Vec<_> = stats
+        .iter()
         .filter(|(p, _)| p.query_type == "scan" && p.filter_fields.contains(&"age".into()))
         .collect();
     assert!(!scan_stats.is_empty(), "scan pattern should be recorded");
 
     let (_, ps) = &scan_stats[0];
     assert_eq!(ps.count, 5, "should record 5 executions");
-    assert_eq!(ps.total_returned, 20, "4 docs returned × 5 runs (age 16,17,18,19)");
+    assert_eq!(
+        ps.total_returned, 20,
+        "4 docs returned × 5 runs (age 16,17,18,19)"
+    );
     // A reactive filter index is built after scan 2 (docs_scanned=20 > threshold=5).
     // Scans 3-5 use the index and record docs_scanned=docs_returned=4 each.
     // Total: 20+20+4+4+4 = 52 — confirms the index reduced scan cost.
-    assert_eq!(ps.total_scanned, 52, "first two scans full (20 each), then 3 via index (4 each)");
+    assert_eq!(
+        ps.total_scanned, 52,
+        "first two scans full (20 each), then 3 via index (4 each)"
+    );
 }
 
 #[test]
@@ -569,7 +650,8 @@ fn test_query_stats_get() {
     engine.get(&DocumentId::new()).unwrap(); // miss
 
     let stats = engine.query_stats().all_patterns();
-    let get_stats: Vec<_> = stats.iter()
+    let get_stats: Vec<_> = stats
+        .iter()
         .filter(|(p, _)| p.query_type == "get")
         .collect();
     assert!(!get_stats.is_empty());
@@ -583,26 +665,38 @@ fn test_query_stats_get() {
 fn test_query_stats_low_selectivity_detection() {
     let (engine, _dir) = test_engine();
     for i in 0..100 {
-        engine.put(IBlob::from_pairs(vec![
-            ("type", Value::String("item".into())),
-            ("category", Value::String(format!("cat{}", i % 10))),
-            ("seq", Value::U64(i)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("type", Value::String("item".into())),
+                ("category", Value::String(format!("cat{}", i % 10))),
+                ("seq", Value::U64(i)),
+            ]))
+            .unwrap();
     }
 
     // Query that scans 100 docs but returns only ~10 (category = "cat0")
     // After 2 scans with low selectivity, a reactive index is created.
     // Check stats after just 2 scans (before index changes the stats).
     for _ in 0..2 {
-        engine.scan(
-            Some(&Filter::Eq { field: "category".into(), value: Value::String("cat0".into()) }),
-            None, None, None,
-        ).unwrap();
+        engine
+            .scan(
+                Some(&Filter::Eq {
+                    field: "category".into(),
+                    value: Value::String("cat0".into()),
+                }),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
     }
 
     // Detect index candidates — selectivity=0.1 (10 returned / 100 scanned)
     let candidates = engine.query_stats().low_selectivity(0.15, 2);
-    assert!(!candidates.is_empty(), "should detect low-selectivity pattern");
+    assert!(
+        !candidates.is_empty(),
+        "should detect low-selectivity pattern"
+    );
     assert!(candidates[0].0.filter_fields.contains(&"category".into()));
 }
 
@@ -624,17 +718,23 @@ fn test_filter_index_built_for_selective_queries() {
         scaling_parameter: 0,
         sort_spill_threshold: 100, // 5 results < 100 < 500 docs scanned
         compaction_threads: 1,
-        adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
     let engine = LsmEngine::open(config).unwrap();
 
     // Insert 500 docs: only 5 have category='rare' (1% selectivity).
     for i in 0u64..500 {
         let category = if i < 5 { "rare" } else { "common" };
-        engine.put(IBlob::from_pairs(vec![
-            ("category", Value::String(category.into())),
-            ("seq", Value::U64(i)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("category", Value::String(category.into())),
+                ("seq", Value::U64(i)),
+            ]))
+            .unwrap();
     }
     engine.flush_memtable().unwrap();
 
@@ -643,18 +743,30 @@ fn test_filter_index_built_for_selective_queries() {
         value: Value::String("rare".into()),
     };
 
-    assert_eq!(engine.secondary_index_count(), 0, "no index before any scan");
+    assert_eq!(
+        engine.secondary_index_count(),
+        0,
+        "no index before any scan"
+    );
 
     // First scan: records stats (count=1), no index yet.
     let results1 = engine.scan(Some(&filter), None, None, None).unwrap();
     assert_eq!(results1.len(), 5, "first scan returns 5 docs");
-    assert_eq!(engine.secondary_index_count(), 0, "no index after first scan");
+    assert_eq!(
+        engine.secondary_index_count(),
+        0,
+        "no index after first scan"
+    );
 
     // Second scan: stats.count=2, docs_scanned=500 > threshold=100, selectivity=0.01 < 0.5.
     // Index is built reactively.
     let results2 = engine.scan(Some(&filter), None, None, None).unwrap();
     assert_eq!(results2.len(), 5, "second scan returns 5 docs");
-    assert_eq!(engine.secondary_index_count(), 1, "filter index built after second scan");
+    assert_eq!(
+        engine.secondary_index_count(),
+        1,
+        "filter index built after second scan"
+    );
 
     // Third scan uses the index: O(log N + R) instead of O(N).
     let results3 = engine.scan(Some(&filter), None, None, None).unwrap();
@@ -677,15 +789,21 @@ fn test_filter_index_not_built_below_scan_threshold() {
         scaling_parameter: 0,
         sort_spill_threshold: 1000, // threshold higher than total docs
         compaction_threads: 1,
-        adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
     let engine = LsmEngine::open(config).unwrap();
 
     for i in 0u64..100 {
-        engine.put(IBlob::from_pairs(vec![
-            ("category", Value::String("common".into())),
-            ("seq", Value::U64(i)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("category", Value::String("common".into())),
+                ("seq", Value::U64(i)),
+            ]))
+            .unwrap();
     }
     engine.flush_memtable().unwrap();
 
@@ -698,7 +816,11 @@ fn test_filter_index_not_built_below_scan_threshold() {
     for _ in 0..5 {
         engine.scan(Some(&filter), None, None, None).unwrap();
     }
-    assert_eq!(engine.secondary_index_count(), 0, "no index when scan cost is below threshold");
+    assert_eq!(
+        engine.secondary_index_count(),
+        0,
+        "no index when scan cost is below threshold"
+    );
 }
 
 #[test]
@@ -714,7 +836,11 @@ fn test_filter_index_survives_restart() {
         scaling_parameter: 0,
         sort_spill_threshold: 100,
         compaction_threads: 1,
-        adaptive_w: false, adaptive_w_cooldown_secs: 1, adaptive_w_max_step: 2, adaptive_w_min: -8, adaptive_w_max: 8,
+        adaptive_w: false,
+        adaptive_w_cooldown_secs: 1,
+        adaptive_w_max_step: 2,
+        adaptive_w_min: -8,
+        adaptive_w_max: 8,
     };
 
     let target_ids: Vec<DocumentId>;
@@ -734,7 +860,8 @@ fn test_filter_index_survives_restart() {
                 engine.put(blob)?;
             }
             engine.flush_memtable()
-        }).unwrap();
+        })
+        .unwrap();
 
         target_ids = ids;
 
@@ -748,12 +875,15 @@ fn test_filter_index_survives_restart() {
             db.with_collection("items", |engine: &LsmEngine| {
                 engine.scan(Some(&filter), None, None, None)?;
                 Ok(())
-            }).unwrap();
+            })
+            .unwrap();
         }
 
-        let count = db.with_collection("items", |engine: &LsmEngine| {
-            Ok(engine.secondary_index_count())
-        }).unwrap();
+        let count = db
+            .with_collection("items", |engine: &LsmEngine| {
+                Ok(engine.secondary_index_count())
+            })
+            .unwrap();
         assert_eq!(count, 1, "filter index built before restart");
     }
 
@@ -761,19 +891,27 @@ fn test_filter_index_survives_restart() {
     {
         let db = Database::open(config).unwrap();
 
-        let count = db.with_collection("items", |engine: &LsmEngine| {
-            Ok(engine.secondary_index_count())
-        }).unwrap();
+        let count = db
+            .with_collection("items", |engine: &LsmEngine| {
+                Ok(engine.secondary_index_count())
+            })
+            .unwrap();
         assert_eq!(count, 1, "filter index survives restart");
 
         let filter = Filter::Eq {
             field: "category".into(),
             value: Value::String("rare".into()),
         };
-        let results = db.with_collection("items", |engine: &LsmEngine| {
-            engine.scan(Some(&filter), None, None, None)
-        }).unwrap();
-        assert_eq!(results.len(), 5, "correct results via reloaded filter index");
+        let results = db
+            .with_collection("items", |engine: &LsmEngine| {
+                engine.scan(Some(&filter), None, None, None)
+            })
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            5,
+            "correct results via reloaded filter index"
+        );
     }
 
     let _ = target_ids;
@@ -806,34 +944,53 @@ fn test_partial_index_merge_produces_full_coverage() {
 
     // Insert 30 docs: 10 "alpha", 10 "beta", 10 "gamma".
     for i in 0..10u64 {
-        engine.put(IBlob::from_pairs(vec![
-            ("category", Value::String("alpha".into())),
-            ("score", Value::U64(i)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("category", Value::String("alpha".into())),
+                ("score", Value::U64(i)),
+            ]))
+            .unwrap();
     }
     for i in 0..10u64 {
-        engine.put(IBlob::from_pairs(vec![
-            ("category", Value::String("beta".into())),
-            ("score", Value::U64(i + 10)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("category", Value::String("beta".into())),
+                ("score", Value::U64(i + 10)),
+            ]))
+            .unwrap();
     }
     for i in 0..10u64 {
-        engine.put(IBlob::from_pairs(vec![
-            ("category", Value::String("gamma".into())),
-            ("score", Value::U64(i + 20)),
-        ])).unwrap();
+        engine
+            .put(IBlob::from_pairs(vec![
+                ("category", Value::String("gamma".into())),
+                ("score", Value::U64(i + 20)),
+            ]))
+            .unwrap();
     }
 
     use ingodb::{SortDirection, SortField};
-    let sort = vec![SortField { field: "score".into(), direction: SortDirection::Ascending }];
+    let sort = vec![SortField {
+        field: "score".into(),
+        direction: SortDirection::Ascending,
+    }];
 
     // Two filtered sort scans → one partial index each (alpha range, beta range).
-    let alpha_filter = Filter::Eq { field: "category".into(), value: Value::String("alpha".into()) };
-    let r1 = engine.scan(Some(&alpha_filter), Some(&sort), None, None).unwrap();
+    let alpha_filter = Filter::Eq {
+        field: "category".into(),
+        value: Value::String("alpha".into()),
+    };
+    let r1 = engine
+        .scan(Some(&alpha_filter), Some(&sort), None, None)
+        .unwrap();
     assert_eq!(r1.len(), 10, "alpha scan returns 10 docs");
 
-    let beta_filter = Filter::Eq { field: "category".into(), value: Value::String("beta".into()) };
-    let r2 = engine.scan(Some(&beta_filter), Some(&sort), None, None).unwrap();
+    let beta_filter = Filter::Eq {
+        field: "category".into(),
+        value: Value::String("beta".into()),
+    };
+    let r2 = engine
+        .scan(Some(&beta_filter), Some(&sort), None, None)
+        .unwrap();
     assert_eq!(r2.len(), 10, "beta scan returns 10 docs");
 
     // Compaction merges the two partial indexes via full rebuild.
@@ -842,12 +999,23 @@ fn test_partial_index_merge_produces_full_coverage() {
     // A no-filter sort scan must return ALL 30 docs.
     // The old buggy merge (union of partial entries) would return only 20.
     let all = engine.scan(None, Some(&sort), None, None).unwrap();
-    assert_eq!(all.len(), 30, "full sort scan returns all docs after partial index merge");
+    assert_eq!(
+        all.len(),
+        30,
+        "full sort scan returns all docs after partial index merge"
+    );
 
     // Verify ascending sort order.
-    let scores: Vec<u64> = all.iter().map(|b| match b.get_field("score") {
-        Some(Value::U64(v)) => v,
-        _ => panic!("missing score field"),
-    }).collect();
-    assert_eq!(scores, (0u64..30).collect::<Vec<_>>(), "docs in ascending score order");
+    let scores: Vec<u64> = all
+        .iter()
+        .map(|b| match b.get_field("score") {
+            Some(Value::U64(v)) => v,
+            _ => panic!("missing score field"),
+        })
+        .collect();
+    assert_eq!(
+        scores,
+        (0u64..30).collect::<Vec<_>>(),
+        "docs in ascending score order"
+    );
 }

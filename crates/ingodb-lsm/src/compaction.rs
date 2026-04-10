@@ -86,7 +86,10 @@ impl UcsCompaction {
             return 0;
         }
         let f = self.fanout();
-        (file_size as f64 / self.flush_size as f64).log(f).floor().max(0.0) as u32
+        (file_size as f64 / self.flush_size as f64)
+            .log(f)
+            .floor()
+            .max(0.0) as u32
     }
 
     /// Pick SSTables to compact based on UCS overlap detection.
@@ -208,7 +211,10 @@ fn find_overlap_group<'a>(ssts: &[&'a SstMeta], threshold: usize) -> Option<Vec<
         } else {
             // No overlap — check if current group qualifies
             if current_group.len() >= threshold {
-                if best_group.as_ref().is_none_or(|g| current_group.len() > g.len()) {
+                if best_group
+                    .as_ref()
+                    .is_none_or(|g| current_group.len() > g.len())
+                {
                     best_group = Some(current_group.clone());
                 }
             }
@@ -219,7 +225,10 @@ fn find_overlap_group<'a>(ssts: &[&'a SstMeta], threshold: usize) -> Option<Vec<
 
     // Check final group
     if current_group.len() >= threshold {
-        if best_group.as_ref().is_none_or(|g| current_group.len() > g.len()) {
+        if best_group
+            .as_ref()
+            .is_none_or(|g| current_group.len() > g.len())
+        {
             best_group = Some(current_group);
         }
     }
@@ -288,11 +297,7 @@ impl SizeTieredCompaction {
         // Get file sizes
         let mut sized: Vec<(PathBuf, u64)> = sst_paths
             .iter()
-            .filter_map(|p| {
-                std::fs::metadata(p)
-                    .ok()
-                    .map(|m| (p.clone(), m.len()))
-            })
+            .filter_map(|p| std::fs::metadata(p).ok().map(|m| (p.clone(), m.len())))
             .collect();
 
         sized.sort_by_key(|(_, size)| *size);
@@ -343,12 +348,12 @@ mod tests {
         assert_eq!(ucs.fanout(), 2.0);
         assert_eq!(ucs.threshold(), 2);
 
-        assert_eq!(ucs.level_for_size(500), 0);   // below flush size
-        assert_eq!(ucs.level_for_size(1000), 0);  // exactly flush size
-        assert_eq!(ucs.level_for_size(1999), 0);  // < 2 * flush
-        assert_eq!(ucs.level_for_size(2000), 1);  // 2x = L1
-        assert_eq!(ucs.level_for_size(4000), 2);  // 4x = L2
-        assert_eq!(ucs.level_for_size(8000), 3);  // 8x = L3
+        assert_eq!(ucs.level_for_size(500), 0); // below flush size
+        assert_eq!(ucs.level_for_size(1000), 0); // exactly flush size
+        assert_eq!(ucs.level_for_size(1999), 0); // < 2 * flush
+        assert_eq!(ucs.level_for_size(2000), 1); // 2x = L1
+        assert_eq!(ucs.level_for_size(4000), 2); // 4x = L2
+        assert_eq!(ucs.level_for_size(8000), 3); // 8x = L3
     }
 
     #[test]
@@ -419,10 +424,10 @@ mod tests {
 
         // Two overlapping L0 and two overlapping L1
         let metas = vec![
-            make_meta("a.sst", 0x10, 0x50, 800, 1),   // L0
-            make_meta("b.sst", 0x30, 0x80, 900, 2),   // L0
-            make_meta("c.sst", 0x10, 0x50, 2500, 3),  // L1
-            make_meta("d.sst", 0x30, 0x80, 3000, 4),  // L1
+            make_meta("a.sst", 0x10, 0x50, 800, 1),  // L0
+            make_meta("b.sst", 0x30, 0x80, 900, 2),  // L0
+            make_meta("c.sst", 0x10, 0x50, 2500, 3), // L1
+            make_meta("d.sst", 0x30, 0x80, 3000, 4), // L1
         ];
 
         let pick = ucs.pick_compaction(&metas).unwrap();

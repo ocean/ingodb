@@ -1,10 +1,10 @@
-mod value;
-mod iblob;
 mod error;
+mod iblob;
+mod value;
 
-pub use value::Value;
-pub use iblob::IBlob;
 pub use error::BlobError;
+pub use iblob::IBlob;
+pub use value::Value;
 
 /// 32-byte content hash (BLAKE3). Used for integrity verification and deduplication.
 pub type ContentHash = [u8; 32];

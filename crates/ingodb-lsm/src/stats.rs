@@ -127,7 +127,11 @@ impl QueryStats {
 
     /// Get patterns with low selectivity (potential index candidates).
     /// Returns patterns where selectivity < threshold and count >= min_count.
-    pub fn low_selectivity(&self, threshold: f64, min_count: u64) -> Vec<(QueryPattern, PatternStats)> {
+    pub fn low_selectivity(
+        &self,
+        threshold: f64,
+        min_count: u64,
+    ) -> Vec<(QueryPattern, PatternStats)> {
         self.all_patterns()
             .into_iter()
             .filter(|(_, stats)| stats.count >= min_count && stats.selectivity() < threshold)
@@ -268,7 +272,10 @@ mod tests {
         });
 
         let ps = stats.get_pattern(&pattern).unwrap();
-        assert!(ps.selectivity() < 0.001, "very low selectivity — index candidate");
+        assert!(
+            ps.selectivity() < 0.001,
+            "very low selectivity — index candidate"
+        );
     }
 
     #[test]
@@ -380,12 +387,18 @@ mod tests {
 
     #[test]
     fn test_extract_filter_fields() {
-        use ingodb_query::Filter;
         use ingodb_blob::Value;
+        use ingodb_query::Filter;
 
         let filter = Filter::And(vec![
-            Filter::Eq { field: "type".into(), value: Value::String("user".into()) },
-            Filter::Gt { field: "age".into(), value: Value::U64(30) },
+            Filter::Eq {
+                field: "type".into(),
+                value: Value::String("user".into()),
+            },
+            Filter::Gt {
+                field: "age".into(),
+                value: Value::U64(30),
+            },
         ]);
 
         let fields = extract_filter_fields(&filter);

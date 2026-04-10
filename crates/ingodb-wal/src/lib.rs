@@ -43,10 +43,7 @@ impl Wal {
     /// Open or create a WAL file at the given path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, WalError> {
         let path = path.as_ref().to_path_buf();
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
         let size = file.metadata()?.len();
         Ok(Wal {
             path,

@@ -9,7 +9,9 @@
 //! 4. Snapshot reads under concurrent writes
 //! 5. Compaction performance
 
-use ingodb::{DocumentId, Filter, IBlob, LsmConfig, LsmEngine, Query, SortDirection, SortField, Value};
+use ingodb::{
+    DocumentId, Filter, IBlob, LsmConfig, LsmEngine, Query, SortDirection, SortField, Value,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,8 +20,16 @@ const NUM_PRODUCTS: u64 = 1_000_000;
 const NUM_LOOKUPS: u64 = 20_000;
 const NUM_SCAN_QUERIES: u64 = 50;
 const CATEGORIES: &[&str] = &[
-    "electronics", "books", "clothing", "home", "sports",
-    "toys", "food", "automotive", "garden", "health",
+    "electronics",
+    "books",
+    "clothing",
+    "home",
+    "sports",
+    "toys",
+    "food",
+    "automotive",
+    "garden",
+    "health",
 ];
 
 fn main() {
@@ -57,7 +67,8 @@ fn main() {
     };
 
     println!("=== IngoDB Benchmark: E-commerce Product Catalog ===\n");
-    println!("Config: {} products, {} MB memtable, {} byte blocks, UCS {}\n",
+    println!(
+        "Config: {} products, {} MB memtable, {} byte blocks, UCS {}\n",
         NUM_PRODUCTS,
         config.memtable_size / 1024 / 1024,
         config.block_size,
@@ -68,8 +79,12 @@ fn main() {
     engine.start_background_compaction();
 
     let report_w = |label: &str, engine: &LsmEngine| {
-        println!("  [{label}] W: effective={}, target={}, SSTables={}",
-            engine.effective_w(), engine.target_w(), engine.sstable_count());
+        println!(
+            "  [{label}] W: effective={}, target={}, SSTables={}",
+            engine.effective_w(),
+            engine.target_w(),
+            engine.sstable_count()
+        );
     };
 
     // Phase 1: Bulk ingest (write-heavy)
@@ -128,27 +143,37 @@ fn main() {
     println!("\n=== Stats ===");
     println!("SSTables on disk: {}", engine.sstable_count());
     println!("Secondary indexes: {}", engine.secondary_index_count());
-    println!("Effective W: {}, target W: {} (started at {})", engine.effective_w(), engine.target_w(), w);
+    println!(
+        "Effective W: {}, target W: {} (started at {})",
+        engine.effective_w(),
+        engine.target_w(),
+        w
+    );
 
     let cs = engine.compaction_stats();
     let runs = cs.runs.load(std::sync::atomic::Ordering::Relaxed);
     let bytes_r = cs.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
     let bytes_w = cs.bytes_written.load(std::sync::atomic::Ordering::Relaxed);
     let ssts_r = cs.sstables_read.load(std::sync::atomic::Ordering::Relaxed);
-    let ssts_w = cs.sstables_written.load(std::sync::atomic::Ordering::Relaxed);
+    let ssts_w = cs
+        .sstables_written
+        .load(std::sync::atomic::Ordering::Relaxed);
     println!("\nCompaction:");
     println!("  Runs: {}", runs);
     println!("  SSTables read: {}, written: {}", ssts_r, ssts_w);
-    println!("  Bytes read: {:.1} MB, written: {:.1} MB",
+    println!(
+        "  Bytes read: {:.1} MB, written: {:.1} MB",
         bytes_r as f64 / 1024.0 / 1024.0,
-        bytes_w as f64 / 1024.0 / 1024.0);
+        bytes_w as f64 / 1024.0 / 1024.0
+    );
     println!("  Write amplification: {:.2}x", cs.write_amplification());
 
     let stats = engine.query_stats();
     let patterns = stats.top_by_count(5);
     println!("\nTop query patterns:");
     for (pattern, ps) in &patterns {
-        println!("  {:>8} {:30} count={:<6} avg={:>8.2?} selectivity={:.3}",
+        println!(
+            "  {:>8} {:30} count={:<6} avg={:>8.2?} selectivity={:.3}",
             pattern.query_type,
             if pattern.filter_fields.is_empty() {
                 "(no filter)".to_string()
@@ -165,8 +190,12 @@ fn main() {
     if !candidates.is_empty() {
         println!("\nIndex candidates (low selectivity):");
         for (pattern, ps) in &candidates {
-            println!("  fields={:?} selectivity={:.4} count={}",
-                pattern.filter_fields, ps.selectivity(), ps.count);
+            println!(
+                "  fields={:?} selectivity={:.4} count={}",
+                pattern.filter_fields,
+                ps.selectivity(),
+                ps.count
+            );
         }
     }
 }
@@ -190,20 +219,30 @@ fn make_product_with_id(id: DocumentId, i: u64) -> IBlob {
     let category = CATEGORIES[(i % CATEGORIES.len() as u64) as usize];
     let price = (i % 1000) as f64 + 0.99;
     let rating = (i % 50) as f64 / 10.0;
-    IBlob::with_id(id, [
-        ("type".into(), Value::String("product".into())),
-        ("name".into(), Value::String(format!("Product #{i}"))),
-        ("category".into(), Value::String(category.into())),
-        ("price".into(), Value::F64(price)),
-        ("rating".into(), Value::F64(rating)),
-        ("stock".into(), Value::U64(i % 500)),
-        ("description".into(), Value::String(format!("Description for product {i} in {category}"))),
-    ].into())
+    IBlob::with_id(
+        id,
+        [
+            ("type".into(), Value::String("product".into())),
+            ("name".into(), Value::String(format!("Product #{i}"))),
+            ("category".into(), Value::String(category.into())),
+            ("price".into(), Value::F64(price)),
+            ("rating".into(), Value::F64(rating)),
+            ("stock".into(), Value::U64(i % 500)),
+            (
+                "description".into(),
+                Value::String(format!("Description for product {i} in {category}")),
+            ),
+        ]
+        .into(),
+    )
 }
 
 fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
     const BATCH_SIZE: u64 = 1000;
-    println!("--- Phase 1: Bulk Ingest ({} products, batch={}) ---", NUM_PRODUCTS, BATCH_SIZE);
+    println!(
+        "--- Phase 1: Bulk Ingest ({} products, batch={}) ---",
+        NUM_PRODUCTS, BATCH_SIZE
+    );
 
     let mut ids = Vec::with_capacity(NUM_PRODUCTS as usize);
     let start = Instant::now();
@@ -211,11 +250,13 @@ fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
     let mut i = 0u64;
     while i < NUM_PRODUCTS {
         let end = (i + BATCH_SIZE).min(NUM_PRODUCTS);
-        let mut batch: Vec<IBlob> = (i..end).map(|j| {
-            let blob = make_product(j);
-            ids.push(*blob.id());
-            blob
-        }).collect();
+        let mut batch: Vec<IBlob> = (i..end)
+            .map(|j| {
+                let blob = make_product(j);
+                ids.push(*blob.id());
+                blob
+            })
+            .collect();
         engine.put_batch(batch).unwrap();
         i = end;
 
@@ -228,7 +269,10 @@ fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
 
     let elapsed = start.elapsed();
     let rate = NUM_PRODUCTS as f64 / elapsed.as_secs_f64();
-    println!("\r  {} docs in {:.2?} ({:.0} docs/sec)", NUM_PRODUCTS, elapsed, rate);
+    println!(
+        "\r  {} docs in {:.2?} ({:.0} docs/sec)",
+        NUM_PRODUCTS, elapsed, rate
+    );
     println!("  SSTables after ingest: {}", engine.sstable_count());
 
     ids
@@ -236,19 +280,28 @@ fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
 
 fn phase_random_updates(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let num_updates = NUM_PRODUCTS;
-    println!("\n--- Phase 1b: Random Updates ({} updates) ---", num_updates);
+    println!(
+        "\n--- Phase 1b: Random Updates ({} updates) ---",
+        num_updates
+    );
 
     // Single-threaded baseline
     {
         let start = Instant::now();
         for i in 0..num_updates {
-            let idx = ((i.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) % ids.len() as u64) as usize;
+            let idx = ((i
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407))
+                % ids.len() as u64) as usize;
             let updated = make_product_with_id(ids[idx], i + NUM_PRODUCTS);
             engine.put(updated).unwrap();
         }
         let elapsed = start.elapsed();
         let rate = num_updates as f64 / elapsed.as_secs_f64();
-        println!("  1 thread:  {} updates in {:.2?} → {:.0} updates/sec", num_updates, elapsed, rate);
+        println!(
+            "  1 thread:  {} updates in {:.2?} → {:.0} updates/sec",
+            num_updates, elapsed, rate
+        );
     }
 
     // Multi-threaded scaling
@@ -264,7 +317,10 @@ fn phase_random_updates(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
                 let offset = t as u64 * updates_per_thread;
                 for i in 0..updates_per_thread {
                     let j = offset + i;
-                    let idx = ((j.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) % ids.len() as u64) as usize;
+                    let idx = ((j
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407))
+                        % ids.len() as u64) as usize;
                     let updated = make_product_with_id(ids[idx], j + NUM_PRODUCTS * 2);
                     engine.put(updated).unwrap();
                 }
@@ -277,15 +333,20 @@ fn phase_random_updates(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
 
         let elapsed = start.elapsed();
         let rate = num_updates as f64 / elapsed.as_secs_f64();
-        println!("  {} threads: {} updates in {:.2?} → {:.0} updates/sec",
-            num_threads, num_updates, elapsed, rate);
+        println!(
+            "  {} threads: {} updates in {:.2?} → {:.0} updates/sec",
+            num_threads, num_updates, elapsed, rate
+        );
     }
 
     println!("  SSTables after updates: {}", engine.sstable_count());
 }
 
 fn phase_point_lookups(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
-    println!("\n--- Phase 2: Point Lookups ({} random gets) ---", NUM_LOOKUPS);
+    println!(
+        "\n--- Phase 2: Point Lookups ({} random gets) ---",
+        NUM_LOOKUPS
+    );
 
     let mut latencies = Vec::with_capacity(NUM_LOOKUPS as usize);
     let mut found = 0u64;
@@ -309,7 +370,10 @@ fn phase_point_lookups(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let rate = NUM_LOOKUPS as f64 / total.as_secs_f64();
 
     println!("  {}/{} found, {:.0} ops/sec", found, NUM_LOOKUPS, rate);
-    println!("  Latency: p50={:>8.2?}  p95={:>8.2?}  p99={:>8.2?}", p50, p95, p99);
+    println!(
+        "  Latency: p50={:>8.2?}  p95={:>8.2?}  p99={:>8.2?}",
+        p50, p95, p99
+    );
 }
 
 fn phase_scan_queries(engine: &Arc<LsmEngine>) {
@@ -327,26 +391,38 @@ fn phase_scan_queries(engine: &Arc<LsmEngine>) {
 
     // First run — cold (no index)
     let t = Instant::now();
-    let results = engine.execute(&Query::Scan {
-        filter: Some(filter.clone()),
-        sort: Some(sort.clone()),
-        project: None,
-        limit: None,
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: Some(filter.clone()),
+            sort: Some(sort.clone()),
+            project: None,
+            limit: None,
+        })
+        .unwrap();
     let cold = t.elapsed();
     println!("  category='electronics' ORDER BY price:");
-    println!("    Cold (no index): {} results in {:?}", results.len(), cold);
+    println!(
+        "    Cold (no index): {} results in {:?}",
+        results.len(),
+        cold
+    );
 
     // Second run — may use index if spilled
     let t = Instant::now();
-    let results2 = engine.execute(&Query::Scan {
-        filter: Some(filter.clone()),
-        sort: Some(sort.clone()),
-        project: None,
-        limit: None,
-    }).unwrap();
+    let results2 = engine
+        .execute(&Query::Scan {
+            filter: Some(filter.clone()),
+            sort: Some(sort.clone()),
+            project: None,
+            limit: None,
+        })
+        .unwrap();
     let warm = t.elapsed();
-    println!("    Warm (with index): {} results in {:?}", results2.len(), warm);
+    println!(
+        "    Warm (with index): {} results in {:?}",
+        results2.len(),
+        warm
+    );
     if cold > Duration::from_micros(1) {
         let speedup = cold.as_secs_f64() / warm.as_secs_f64().max(1e-9);
         println!("    Speedup: {:.1}x", speedup);
@@ -354,8 +430,14 @@ fn phase_scan_queries(engine: &Arc<LsmEngine>) {
 
     // Query 2: compound filter, sort descending
     let compound = Filter::And(vec![
-        Filter::Gt { field: "price".into(), value: Value::F64(50.0) },
-        Filter::Gt { field: "rating".into(), value: Value::F64(3.0) },
+        Filter::Gt {
+            field: "price".into(),
+            value: Value::F64(50.0),
+        },
+        Filter::Gt {
+            field: "rating".into(),
+            value: Value::F64(3.0),
+        },
     ]);
     let sort_rating = vec![SortField {
         field: "rating".into(),
@@ -363,30 +445,37 @@ fn phase_scan_queries(engine: &Arc<LsmEngine>) {
     }];
 
     let t = Instant::now();
-    let results = engine.execute(&Query::Scan {
-        filter: Some(compound),
-        sort: Some(sort_rating),
-        project: None,
-        limit: Some(20),
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: Some(compound),
+            sort: Some(sort_rating),
+            project: None,
+            limit: Some(20),
+        })
+        .unwrap();
     println!("\n  price>50 AND rating>3.0 ORDER BY rating DESC LIMIT 20:");
     println!("    {} results in {:?}", results.len(), t.elapsed());
 
     // Query 3: projection — only return name and price
     let t = Instant::now();
-    let results = engine.execute(&Query::Scan {
-        filter: Some(filter),
-        sort: Some(sort),
-        project: Some(vec!["name".into(), "price".into()]),
-        limit: Some(10),
-    }).unwrap();
+    let results = engine
+        .execute(&Query::Scan {
+            filter: Some(filter),
+            sort: Some(sort),
+            project: Some(vec!["name".into(), "price".into()]),
+            limit: Some(10),
+        })
+        .unwrap();
     println!("\n  category='electronics' ORDER BY price LIMIT 10 PROJECT(name, price):");
     println!("    {} results in {:?}", results.len(), t.elapsed());
     for r in results.iter().take(3) {
         println!("    {:?} price={:?}", r.get("name"), r.get("price"));
     }
 
-    println!("  Secondary indexes after queries: {}", engine.secondary_index_count());
+    println!(
+        "  Secondary indexes after queries: {}",
+        engine.secondary_index_count()
+    );
 }
 
 fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
@@ -400,15 +489,19 @@ fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let t = Instant::now();
     for i in 0..num_updates {
         let idx = ((i * 3571) % ids.len() as u64) as usize;
-        let updated = IBlob::with_id(ids[idx], [
-            ("type".into(), Value::String("product".into())),
-            ("name".into(), Value::String(format!("UPDATED Product"))),
-            ("price".into(), Value::F64(999.99)),
-            ("category".into(), Value::String("updated".into())),
-            ("rating".into(), Value::F64(0.0)),
-            ("stock".into(), Value::U64(0)),
-            ("description".into(), Value::String("Updated".into())),
-        ].into());
+        let updated = IBlob::with_id(
+            ids[idx],
+            [
+                ("type".into(), Value::String("product".into())),
+                ("name".into(), Value::String(format!("UPDATED Product"))),
+                ("price".into(), Value::F64(999.99)),
+                ("category".into(), Value::String("updated".into())),
+                ("rating".into(), Value::F64(0.0)),
+                ("stock".into(), Value::U64(0)),
+                ("description".into(), Value::String("Updated".into())),
+            ]
+            .into(),
+        );
         engine.put(updated).unwrap();
     }
     let write_time = t.elapsed();
@@ -427,7 +520,10 @@ fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     }
     let snap_time = t.elapsed();
     println!("  100 snapshot reads in {:?}", snap_time);
-    println!("  Snapshot isolation: {}/100 reads saw pre-update data", snapshot_correct);
+    println!(
+        "  Snapshot isolation: {}/100 reads saw pre-update data",
+        snapshot_correct
+    );
 
     // Read latest — should see updates
     let t = Instant::now();
@@ -473,7 +569,10 @@ fn phase_mixed_workload(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
 
     let elapsed = start.elapsed();
     let rate = total_ops as f64 / elapsed.as_secs_f64();
-    println!("  {} ops ({} reads, {} writes) in {:.2?}", total_ops, reads, writes, elapsed);
+    println!(
+        "  {} ops ({} reads, {} writes) in {:.2?}",
+        total_ops, reads, writes, elapsed
+    );
     println!("  {:.0} ops/sec", rate);
 }
 
@@ -506,8 +605,10 @@ fn phase_concurrent_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
         let total_ops = ops_per_thread * num_threads as u64;
         let rate = total_ops as f64 / elapsed.as_secs_f64();
 
-        println!("  {:>2} threads: {:>6} ops in {:>8.2?} → {:>8.0} ops/sec  ({} found)",
-            num_threads, total_ops, elapsed, rate, total_found);
+        println!(
+            "  {:>2} threads: {:>6} ops in {:>8.2?} → {:>8.0} ops/sec  ({} found)",
+            num_threads, total_ops, elapsed, rate, total_found
+        );
     }
 
     // Also test concurrent reads + writes
@@ -556,13 +657,18 @@ fn phase_concurrent_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let elapsed = start.elapsed();
     let total_ops = total_reads + total_writes;
     let rate = total_ops as f64 / elapsed.as_secs_f64();
-    println!("    {} total ops ({} reads, {} writes) in {:?} → {:.0} ops/sec",
-        total_ops, total_reads, total_writes, elapsed, rate);
+    println!(
+        "    {} total ops ({} reads, {} writes) in {:?} → {:.0} ops/sec",
+        total_ops, total_reads, total_writes, elapsed, rate
+    );
 }
 
 fn phase_pure_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let num_reads = NUM_PRODUCTS * 2;
-    println!("\n--- Phase 7: Pure Reads ({} sequential gets, zero writes) ---", num_reads);
+    println!(
+        "\n--- Phase 7: Pure Reads ({} sequential gets, zero writes) ---",
+        num_reads
+    );
 
     let start = Instant::now();
     let mut found = 0u64;
@@ -576,5 +682,8 @@ fn phase_pure_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
 
     let elapsed = start.elapsed();
     let rate = num_reads as f64 / elapsed.as_secs_f64();
-    println!("  {}/{} found, {:.0} ops/sec in {:?}", found, num_reads, rate, elapsed);
+    println!(
+        "  {}/{} found, {:.0} ops/sec in {:?}",
+        found, num_reads, rate, elapsed
+    );
 }

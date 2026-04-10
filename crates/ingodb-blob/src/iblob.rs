@@ -1,4 +1,4 @@
-use crate::{BlobError, ContentHash, DocumentId, Value, FORMAT_VERSION, MAGIC};
+use crate::{BlobError, ContentHash, DocumentId, FORMAT_VERSION, MAGIC, Value};
 use std::collections::BTreeMap;
 
 /// Index entry in the I-Blob header: maps a key hash to its location in the payload.
@@ -17,7 +17,7 @@ const INDEX_ENTRY_SIZE: usize = 16; // 8 + 4 + 4
 const HEADER_SIZE: usize = 4 + 2 + 16 + 16 + 1 + 32 + 4;
 
 /// IBlob flags (stored as 1 byte in the header)
-const FLAG_DELETED: u8 = 0x01;    // bit 0: tombstone
+const FLAG_DELETED: u8 = 0x01; // bit 0: tombstone
 const FLAG_PROJECTION: u8 = 0x02; // bit 1: partial view of a document
 
 /// An IngoDB document: a collection of named fields with stable identity.
@@ -124,10 +124,8 @@ impl IBlob {
 
     /// Create from a list of (key, value) tuples.
     pub fn from_pairs(pairs: Vec<(impl Into<String>, Value)>) -> Self {
-        let fields: BTreeMap<String, Value> = pairs
-            .into_iter()
-            .map(|(k, v)| (k.into(), v))
-            .collect();
+        let fields: BTreeMap<String, Value> =
+            pairs.into_iter().map(|(k, v)| (k.into(), v)).collect();
         Self::new(fields)
     }
 
@@ -263,8 +261,7 @@ impl IBlob {
         index_entries.sort_by_key(|e| e.key_hash);
 
         // Assemble the full blob
-        let total_size =
-            HEADER_SIZE + (index_entries.len() * INDEX_ENTRY_SIZE) + payload.len();
+        let total_size = HEADER_SIZE + (index_entries.len() * INDEX_ENTRY_SIZE) + payload.len();
         let mut buf = Vec::with_capacity(total_size);
 
         // Header
@@ -329,8 +326,7 @@ impl IBlob {
         stored_hash.copy_from_slice(&buf[39..71]);
 
         // Index count (offset 71..75)
-        let index_count =
-            u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
+        let index_count = u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
 
         let index_end = HEADER_SIZE + index_count * INDEX_ENTRY_SIZE;
         if buf.len() < index_end {
@@ -377,8 +373,7 @@ impl IBlob {
                     have: field_data.len(),
                 });
             }
-            let key_len =
-                u32::from_le_bytes(field_data[0..4].try_into().unwrap()) as usize;
+            let key_len = u32::from_le_bytes(field_data[0..4].try_into().unwrap()) as usize;
             if field_data.len() < 4 + key_len {
                 return Err(BlobError::BufferTooShort {
                     need: 4 + key_len,
@@ -423,8 +418,7 @@ impl IBlob {
             });
         }
 
-        let index_count =
-            u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
+        let index_count = u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
         let index_end = HEADER_SIZE + index_count * INDEX_ENTRY_SIZE;
 
         let target_hash = Self::key_hash(field_name);
@@ -450,17 +444,14 @@ impl IBlob {
             if kh != target_hash {
                 break;
             }
-            let offset =
-                u32::from_le_bytes(buf[base + 8..base + 12].try_into().unwrap()) as usize;
-            let length =
-                u32::from_le_bytes(buf[base + 12..base + 16].try_into().unwrap()) as usize;
+            let offset = u32::from_le_bytes(buf[base + 8..base + 12].try_into().unwrap()) as usize;
+            let length = u32::from_le_bytes(buf[base + 12..base + 16].try_into().unwrap()) as usize;
 
             let payload_start = index_end + offset;
             let field_data = &buf[payload_start..payload_start + length];
 
             // Check actual key
-            let key_len =
-                u32::from_le_bytes(field_data[0..4].try_into().unwrap()) as usize;
+            let key_len = u32::from_le_bytes(field_data[0..4].try_into().unwrap()) as usize;
             let key = std::str::from_utf8(&field_data[4..4 + key_len])?;
 
             if key == field_name {
@@ -569,7 +560,11 @@ mod tests {
         tomb.set_version(DocumentId::new());
 
         let encoded = tomb.encode();
-        assert_ne!(*tomb.hash(), [0u8; 32], "tombstone should have a real hash after encode");
+        assert_ne!(
+            *tomb.hash(),
+            [0u8; 32],
+            "tombstone should have a real hash after encode"
+        );
 
         let decoded = IBlob::decode(&encoded).unwrap();
         assert_eq!(decoded.id(), &id);
@@ -593,7 +588,10 @@ mod tests {
         assert_eq!(projected.field_count(), 2);
         assert_eq!(projected.get("name"), Some(&Value::String("Henrik".into())));
         assert_eq!(projected.get("age"), Some(&Value::U64(42)));
-        assert!(projected.get("active").is_none(), "unprojected field absent");
+        assert!(
+            projected.get("active").is_none(),
+            "unprojected field absent"
+        );
 
         // Same _id and _version as original
         assert_eq!(projected.id(), blob.id());
@@ -667,7 +665,10 @@ mod tests {
     fn test_invalid_magic() {
         let mut encoded = sample_blob().encode();
         encoded[0] = b'X';
-        assert!(matches!(IBlob::decode(&encoded), Err(BlobError::InvalidMagic)));
+        assert!(matches!(
+            IBlob::decode(&encoded),
+            Err(BlobError::InvalidMagic)
+        ));
     }
 
     #[test]
@@ -693,6 +694,10 @@ mod tests {
         blob.set_version(DocumentId::new());
         blob.encode();
         blob.encode();
-        assert_eq!(blob.hash_computations(), 1, "put path computes hash exactly once");
+        assert_eq!(
+            blob.hash_computations(),
+            1,
+            "put path computes hash exactly once"
+        );
     }
 }

@@ -92,7 +92,8 @@ impl SSTableWriter {
 
             // If adding this entry would exceed block size, flush current block
             if block_entry_count > 0 && current_block.len() + entry_size > self.block_size {
-                let (offset, size) = self.flush_block(&mut writer, &current_block, block_entry_count, file_offset)?;
+                let (offset, size) =
+                    self.flush_block(&mut writer, &current_block, block_entry_count, file_offset)?;
                 block_index_entries.push((last_key_in_block.clone(), offset, size));
                 file_offset = offset + size as u64;
 
@@ -113,7 +114,8 @@ impl SSTableWriter {
 
         // Flush final block
         if block_entry_count > 0 {
-            let (offset, size) = self.flush_block(&mut writer, &current_block, block_entry_count, file_offset)?;
+            let (offset, size) =
+                self.flush_block(&mut writer, &current_block, block_entry_count, file_offset)?;
             block_index_entries.push((last_key_in_block, offset, size));
         }
 

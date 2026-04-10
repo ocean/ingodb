@@ -128,7 +128,9 @@ impl MemTable {
     /// Create an iterator over entries. Returns (_id, IBlob) pairs.
     /// Includes all versions.
     pub fn iter(&self) -> MemTableIter {
-        let entries: Vec<_> = self.entries.read()
+        let entries: Vec<_> = self
+            .entries
+            .read()
             .values()
             .map(|v| (*v.id(), v.clone()))
             .collect();
