@@ -1050,7 +1050,7 @@ impl LsmEngine {
     /// Also flushes the memtable if it has data.
     pub fn wait_for_compaction(&self) -> Result<(), LsmError> {
         // Rotate active memtable if it has data, then flush all immutables
-        if self.memtable.read().len() > 0 {
+        if !self.memtable.read().is_empty() {
             self.rotate_memtable()?;
         }
         self.flush_immutable_memtables()?;
@@ -1084,6 +1084,9 @@ impl LsmEngine {
     }
 
     /// Check if a secondary index exists for the given sort fields.
+    /// Not yet used — intended for a future explicit index management API
+    /// (e.g. `engine.ensure_index(&["field"])`).
+    #[allow(dead_code)]
     fn has_secondary_index(&self, sort_fields: &[String]) -> bool {
         self.secondary_indexes
             .lock()
@@ -1092,6 +1095,8 @@ impl LsmEngine {
     }
 
     /// Build a secondary index for the given sort fields from current SSTables.
+    /// Not yet used — intended for a future explicit index management API.
+    #[allow(dead_code)]
     fn build_secondary_index(&self, sort_fields: &[String]) -> Result<(), LsmError> {
         let sstables = self.sstables.read();
         let sst_refs: Vec<&SSTableReader> = sstables.iter().collect();
@@ -1408,7 +1413,7 @@ impl LsmEngine {
     /// Synchronously flush and compact (SSTable + index).
     /// Primarily useful in tests and benchmarks to trigger immediate compaction.
     pub fn compact_now(&self) -> Result<(), LsmError> {
-        if self.memtable.read().len() > 0 {
+        if !self.memtable.read().is_empty() {
             self.rotate_memtable()?;
         }
         self.flush_immutable_memtables()?;
@@ -1637,7 +1642,9 @@ impl LsmEngine {
                             join_edge: None,
                         };
                         if let Some(stats) = self.query_stats.get_pattern(&pattern) {
-                            if stats.selectivity() <= 0.5 && stats.count >= 2 {
+                            if stats.selectivity() <= 0.5
+                                && stats.count >= secondary::DEFAULT_INDEX_THRESHOLD
+                            {
                                 // Build a full-range index sorted by this field
                                 // Re-scan all docs to build a complete index
                                 let all_docs: Vec<IBlob> = self
@@ -3531,28 +3538,31 @@ mod tests {
 
         assert_eq!(engine.secondary_index_count(), 0, "no index initially");
 
-        // First filter scan — records stats but doesn't build index (count=1)
+        // Scans 1 and 2 — stats accumulate but index not yet built (count < DEFAULT_INDEX_THRESHOLD=3)
         let filter = Filter::Eq {
             field: "category".into(),
             value: Value::String("electronics".into()),
         };
         engine.scan(Some(&filter), None, None, None).unwrap();
+        assert_eq!(engine.secondary_index_count(), 0, "no index after first scan");
+
+        engine.scan(Some(&filter), None, None, None).unwrap();
         assert_eq!(
             engine.secondary_index_count(),
             0,
-            "no index after first scan"
+            "no index after second scan"
         );
 
-        // Second filter scan — stats show count=2, selectivity=0.5 → build index
+        // Third filter scan — stats show count=3 == DEFAULT_INDEX_THRESHOLD, selectivity=0.5 → build index
         let results = engine.scan(Some(&filter), None, None, None).unwrap();
         assert_eq!(results.len(), 10);
         assert_eq!(
             engine.secondary_index_count(),
             1,
-            "index created reactively after 2 scans"
+            "index created reactively after 3 scans (DEFAULT_INDEX_THRESHOLD=3)"
         );
 
-        // Third scan should use the index
+        // Fourth scan should use the index
         let results = engine.scan(Some(&filter), None, None, None).unwrap();
         assert_eq!(
             results.len(),

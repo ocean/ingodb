@@ -17,7 +17,7 @@ impl BloomFilter {
     /// Create a bloom filter sized for the expected number of keys.
     pub fn new(num_keys: usize) -> Self {
         let num_bits = (num_keys * DEFAULT_BITS_PER_KEY).max(64);
-        let num_bytes = (num_bits + 7) / 8;
+        let num_bytes = num_bits.div_ceil(8);
         BloomFilter {
             bits: vec![0u8; num_bytes],
             num_bits,
