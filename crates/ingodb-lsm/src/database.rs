@@ -30,16 +30,16 @@ impl Database {
         for entry in std::fs::read_dir(&data_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_dir() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    let coll_config = Self::collection_config(&config, &data_dir, name);
-                    match LsmEngine::open(coll_config) {
-                        Ok(engine) => {
-                            collections.insert(name.to_string(), engine);
-                        }
-                        Err(e) => {
-                            eprintln!("warning: failed to open collection {name}: {e}");
-                        }
+            if path.is_dir()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                let coll_config = Self::collection_config(&config, &data_dir, name);
+                match LsmEngine::open(coll_config) {
+                    Ok(engine) => {
+                        collections.insert(name.to_string(), engine);
+                    }
+                    Err(e) => {
+                        eprintln!("warning: failed to open collection {name}: {e}");
                     }
                 }
             }
@@ -72,12 +72,11 @@ impl Database {
 
                 let fields: Vec<String> = fields_str.split(',').map(|s| s.to_string()).collect();
 
-                if let Some(engine) = collections.get(&coll_name) {
-                    if idx_path.exists() {
-                        if let Err(e) = engine.load_secondary_index(fields, None, &idx_path) {
-                            eprintln!("warning: failed to load index {}: {e}", idx_path.display());
-                        }
-                    }
+                if let Some(engine) = collections.get(&coll_name)
+                    && idx_path.exists()
+                    && let Err(e) = engine.load_secondary_index(fields, None, &idx_path)
+                {
+                    eprintln!("warning: failed to load index {}: {e}", idx_path.display());
                 }
             }
         }
@@ -118,19 +117,19 @@ impl Database {
 
         // Persist any newly built secondary indexes
         let pending = engine.drain_pending_index_metadata();
-        if !pending.is_empty() {
-            if let Some(system) = collections.get("system") {
-                for meta in pending {
-                    let fields_str = meta.fields.join(",");
-                    let path_str = meta.path.to_string_lossy().to_string();
-                    let blob = IBlob::from_pairs(vec![
-                        ("type", Value::String("index".into())),
-                        ("collection", Value::String(name.to_string())),
-                        ("fields", Value::String(fields_str)),
-                        ("path", Value::String(path_str)),
-                    ]);
-                    system.put(blob)?;
-                }
+        if !pending.is_empty()
+            && let Some(system) = collections.get("system")
+        {
+            for meta in pending {
+                let fields_str = meta.fields.join(",");
+                let path_str = meta.path.to_string_lossy().to_string();
+                let blob = IBlob::from_pairs(vec![
+                    ("type", Value::String("index".into())),
+                    ("collection", Value::String(name.to_string())),
+                    ("fields", Value::String(fields_str)),
+                    ("path", Value::String(path_str)),
+                ]);
+                system.put(blob)?;
             }
         }
 

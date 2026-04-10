@@ -210,13 +210,12 @@ fn find_overlap_group<'a>(ssts: &[&'a SstMeta], threshold: usize) -> Option<Vec<
             }
         } else {
             // No overlap — check if current group qualifies
-            if current_group.len() >= threshold {
-                if best_group
+            if current_group.len() >= threshold
+                && best_group
                     .as_ref()
                     .is_none_or(|g| current_group.len() > g.len())
-                {
-                    best_group = Some(current_group.clone());
-                }
+            {
+                best_group = Some(current_group.clone());
             }
             current_group = vec![sst];
             running_max = sst.max_id;
@@ -224,13 +223,12 @@ fn find_overlap_group<'a>(ssts: &[&'a SstMeta], threshold: usize) -> Option<Vec<
     }
 
     // Check final group
-    if current_group.len() >= threshold {
-        if best_group
+    if current_group.len() >= threshold
+        && best_group
             .as_ref()
             .is_none_or(|g| current_group.len() > g.len())
-        {
-            best_group = Some(current_group);
-        }
+    {
+        best_group = Some(current_group);
     }
 
     best_group

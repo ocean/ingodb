@@ -272,10 +272,10 @@ impl LsmEngine {
 
             for entry in sst_files {
                 let path = entry.path();
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(id) = stem.parse::<u64>() {
-                        max_id = max_id.max(id);
-                    }
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    && let Ok(id) = stem.parse::<u64>()
+                {
+                    max_id = max_id.max(id);
                 }
                 match SSTableReader::open(&path) {
                     Ok(reader) => sstables.push(reader),
@@ -1166,16 +1166,16 @@ impl LsmEngine {
                         continue;
                     }
                     // Apply filter on the full document
-                    if let Some(f) = filter {
-                        if !f.matches(&|field| blob.get_field(field)) {
-                            continue;
-                        }
+                    if let Some(f) = filter
+                        && !f.matches(&|field| blob.get_field(field))
+                    {
+                        continue;
                     }
                     results.push(blob);
-                    if let Some(lim) = limit {
-                        if results.len() >= lim {
-                            break;
-                        }
+                    if let Some(lim) = limit
+                        && results.len() >= lim
+                    {
+                        break;
                     }
                 }
                 Ok(None) => continue, // stale/deleted — skip
@@ -1344,10 +1344,10 @@ impl LsmEngine {
                     }
                     if seen.insert(*blob.id()) {
                         results.push(blob);
-                        if let Some(lim) = limit {
-                            if results.len() >= lim {
-                                break;
-                            }
+                        if let Some(lim) = limit
+                            && results.len() >= lim
+                        {
+                            break;
                         }
                     }
                 }
@@ -1462,48 +1462,46 @@ impl LsmEngine {
                     .iter()
                     .all(|sf| sf.direction == SortDirection::Descending);
 
-                if all_ascending || all_descending {
-                    if let Some(result) =
+                if (all_ascending || all_descending)
+                    && let Some(result) =
                         self.scan_with_secondary_index(&field_names, filter, limit)
-                    {
-                        let mut results = result?;
-                        if all_descending {
-                            results.reverse();
-                            // Re-apply limit after reverse (index scan may have applied limit from the wrong end)
-                            if let Some(lim) = limit {
-                                results.truncate(lim);
-                            }
+                {
+                    let mut results = result?;
+                    if all_descending {
+                        results.reverse();
+                        // Re-apply limit after reverse (index scan may have applied limit from the wrong end)
+                        if let Some(lim) = limit {
+                            results.truncate(lim);
                         }
-                        if let Some(fields) = project {
-                            results = results
-                                .into_iter()
-                                .map(|blob| blob.project(fields))
-                                .collect();
-                        }
-                        let docs_returned = results.len() as u64;
-                        timer.set_docs_scanned(docs_returned);
-                        self.query_stats.record(timer.finish(docs_returned));
-                        return Ok(results);
                     }
+                    if let Some(fields) = project {
+                        results = results
+                            .into_iter()
+                            .map(|blob| blob.project(fields))
+                            .collect();
+                    }
+                    let docs_returned = results.len() as u64;
+                    timer.set_docs_scanned(docs_returned);
+                    self.query_stats.record(timer.finish(docs_returned));
+                    return Ok(results);
                 }
             }
             // Try secondary index for filter-only scans (no sort required)
-            if sort.is_none() {
-                if let Some(filter) = filter {
-                    if let Some(result) = self.scan_with_filter_index(filter, limit, snapshot) {
-                        let mut results = result?;
-                        if let Some(fields) = project {
-                            results = results
-                                .into_iter()
-                                .map(|blob| blob.project(fields))
-                                .collect();
-                        }
-                        let docs_returned = results.len() as u64;
-                        timer.set_docs_scanned(docs_returned);
-                        self.query_stats.record(timer.finish(docs_returned));
-                        return Ok(results);
-                    }
+            if sort.is_none()
+                && let Some(filter) = filter
+                && let Some(result) = self.scan_with_filter_index(filter, limit, snapshot)
+            {
+                let mut results = result?;
+                if let Some(fields) = project {
+                    results = results
+                        .into_iter()
+                        .map(|blob| blob.project(fields))
+                        .collect();
                 }
+                let docs_returned = results.len() as u64;
+                timer.set_docs_scanned(docs_returned);
+                self.query_stats.record(timer.finish(docs_returned));
+                return Ok(results);
             }
         } // end secondary index check (latest snapshot only)
 
@@ -1545,10 +1543,10 @@ impl LsmEngine {
             if blob.is_deleted() {
                 continue;
             }
-            if let Some(f) = filter {
-                if !f.matches(&|field| blob.get_field(field)) {
-                    continue;
-                }
+            if let Some(f) = filter
+                && !f.matches(&|field| blob.get_field(field))
+            {
+                continue;
             }
             results.push(blob);
         }
@@ -1616,62 +1614,62 @@ impl LsmEngine {
         // Reactive: build filter index if warranted.
         // Trigger is based on docs_scanned (the cost of the full scan), not results.len().
         // A highly selective filter (1% match rate) has low results.len() but high scan cost.
-        if sort.is_none() && docs_scanned > self.config.sort_spill_threshold as u64 {
-            if let Some(filter) = filter {
-                // Extract the filter field for a simple single-field filter
-                let field = match filter {
-                    Filter::Eq { field, .. }
-                    | Filter::Gt { field, .. }
-                    | Filter::Lt { field, .. }
-                    | Filter::Range { field, .. } => Some(field.clone()),
-                    _ => None,
-                };
-                if let Some(field) = field {
-                    // Check if an index already exists for this field
-                    let has_index = self
-                        .secondary_indexes
-                        .lock()
-                        .iter()
-                        .any(|idx| idx.fields.len() == 1 && idx.fields[0] == field);
-                    if !has_index {
-                        // Check stats: build only if low selectivity and repeated
-                        let pattern = QueryPattern {
-                            query_type: "scan".into(),
-                            filter_fields: vec![field.clone()],
-                            sort_fields: vec![],
-                            join_edge: None,
-                        };
-                        if let Some(stats) = self.query_stats.get_pattern(&pattern) {
-                            if stats.selectivity() <= 0.5
-                                && stats.count >= secondary::DEFAULT_INDEX_THRESHOLD
-                            {
-                                // Build a full-range index sorted by this field
-                                // Re-scan all docs to build a complete index
-                                let all_docs: Vec<IBlob> = self
-                                    .memtable
-                                    .read()
-                                    .iter()
-                                    .map(|(_, b)| b)
-                                    .chain(self.sstables.read().iter().flat_map(|sst| {
-                                        sst.iter().unwrap_or_default().into_iter().map(|(_, b)| b)
-                                    }))
-                                    .collect();
-                                let mut deduped = all_docs;
-                                deduped.sort_by(|a, b| {
-                                    a.id()
-                                        .cmp(b.id())
-                                        .then_with(|| b.version().cmp(a.version()))
-                                });
-                                deduped.dedup_by(|a, b| a.id() == b.id());
-                                deduped.retain(|b| !b.is_deleted());
+        if sort.is_none()
+            && docs_scanned > self.config.sort_spill_threshold as u64
+            && let Some(filter) = filter
+        {
+            // Extract the filter field for a simple single-field filter
+            let field = match filter {
+                Filter::Eq { field, .. }
+                | Filter::Gt { field, .. }
+                | Filter::Lt { field, .. }
+                | Filter::Range { field, .. } => Some(field.clone()),
+                _ => None,
+            };
+            if let Some(field) = field {
+                // Check if an index already exists for this field
+                let has_index = self
+                    .secondary_indexes
+                    .lock()
+                    .iter()
+                    .any(|idx| idx.fields.len() == 1 && idx.fields[0] == field);
+                if !has_index {
+                    // Check stats: build only if low selectivity and repeated
+                    let pattern = QueryPattern {
+                        query_type: "scan".into(),
+                        filter_fields: vec![field.clone()],
+                        sort_fields: vec![],
+                        join_edge: None,
+                    };
+                    if let Some(stats) = self.query_stats.get_pattern(&pattern)
+                        && stats.selectivity() <= 0.5
+                        && stats.count >= secondary::DEFAULT_INDEX_THRESHOLD
+                    {
+                        // Build a full-range index sorted by this field
+                        // Re-scan all docs to build a complete index
+                        let all_docs: Vec<IBlob> = self
+                            .memtable
+                            .read()
+                            .iter()
+                            .map(|(_, b)| b)
+                            .chain(self.sstables.read().iter().flat_map(|sst| {
+                                sst.iter().unwrap_or_default().into_iter().map(|(_, b)| b)
+                            }))
+                            .collect();
+                        let mut deduped = all_docs;
+                        deduped.sort_by(|a, b| {
+                            a.id()
+                                .cmp(b.id())
+                                .then_with(|| b.version().cmp(a.version()))
+                        });
+                        deduped.dedup_by(|a, b| a.id() == b.id());
+                        deduped.retain(|b| !b.is_deleted());
 
-                                let _ = self.spill_to_partial_index(
-                                    &[field],
-                                    None, // full range
-                                    &mut deduped,
-                                );
-                            }
-                        }
+                        let _ = self.spill_to_partial_index(
+                            &[field],
+                            None, // full range
+                            &mut deduped,
+                        );
                     }
                 }
             }
@@ -1733,10 +1731,11 @@ impl LsmEngine {
             let mut next = Vec::new();
             let candidates = self.scan_at(None, None, None, None, snapshot)?;
             for doc in candidates {
-                if let Some(target_val) = doc.get_field(to_field) {
-                    if join_values.contains(&target_val) && seen.insert(*doc.id()) {
-                        next.push(doc);
-                    }
+                if let Some(target_val) = doc.get_field(to_field)
+                    && join_values.contains(&target_val)
+                    && seen.insert(*doc.id())
+                {
+                    next.push(doc);
                 }
             }
 
