@@ -87,6 +87,12 @@ pub struct QueryStats {
     patterns: Mutex<HashMap<QueryPattern, PatternStats>>,
 }
 
+impl Default for QueryStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QueryStats {
     pub fn new() -> Self {
         QueryStats {
