@@ -1788,7 +1788,7 @@ impl Drop for LsmEngine {
 /// L0 first → L1 → L2 → ..., within each level newest first (by filename/creation order).
 ///
 /// This guarantees that for any `_id`, the first match is the current version.
-fn sort_sstables_by_level(sstables: &mut Vec<SSTableReader>, ucs: &UcsCompaction) {
+fn sort_sstables_by_level(sstables: &mut [SSTableReader], ucs: &UcsCompaction) {
     sstables.sort_by(|a, b| {
         let level_a = ucs.level_for_size(a.file_size());
         let level_b = ucs.level_for_size(b.file_size());
