@@ -88,15 +88,15 @@ impl Filter {
         match self {
             Filter::Eq { field, value } => get_field(field).as_ref() == Some(value),
 
-            Filter::Gt { field, value } => get_field(field).as_ref().map_or(false, |v| {
+            Filter::Gt { field, value } => get_field(field).as_ref().is_some_and(|v| {
                 compare_values(v, value) == Some(std::cmp::Ordering::Greater)
             }),
 
-            Filter::Lt { field, value } => get_field(field).as_ref().map_or(false, |v| {
+            Filter::Lt { field, value } => get_field(field).as_ref().is_some_and(|v| {
                 compare_values(v, value) == Some(std::cmp::Ordering::Less)
             }),
 
-            Filter::Range { field, low, high } => get_field(field).as_ref().map_or(false, |v| {
+            Filter::Range { field, low, high } => get_field(field).as_ref().is_some_and(|v| {
                 matches!(
                     compare_values(v, low),
                     Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)

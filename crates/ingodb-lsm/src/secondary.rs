@@ -351,7 +351,7 @@ impl SecondaryIndex {
             .filter(|blob| {
                 range
                     .as_ref()
-                    .map_or(true, |f| f.matches(&|field| blob.get_field(field)))
+                    .is_none_or(|f| f.matches(&|field| blob.get_field(field)))
             })
             .map(|blob| blob.project(&self.fields))
             .collect();

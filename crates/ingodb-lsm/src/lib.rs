@@ -1190,7 +1190,7 @@ impl LsmEngine {
             .iter()
             .map(|(_, blob)| blob)
             .filter(|blob| !blob.is_deleted())
-            .filter(|blob| filter.map_or(true, |f| f.matches(&|field| blob.get_field(field))))
+            .filter(|blob| filter.is_none_or(|f| f.matches(&|field| blob.get_field(field))))
             .collect();
 
         if !memtable_docs.is_empty() {
