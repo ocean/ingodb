@@ -540,7 +540,7 @@ impl LsmEngine {
     /// Flush one memtable to an SSTable + update indexes + reset WAL.
     /// 1. Primary SSTable from memtable data
     /// 2. Secondary index entries for the flushed data (merge buffer to disk)
-    /// Only after both succeed: update metadata (SSTable list), reset WAL.
+    ///    Only after both succeed: update metadata (SSTable list), reset WAL.
     fn flush_single_memtable(&self, memtable: MemTable) -> Result<(), LsmError> {
         let mut blobs = memtable.drain();
         if blobs.is_empty() {
