@@ -6,3 +6,4 @@ Cargo.lock
 *.wal
 ingodb_data/
 /data/
+.claude/
