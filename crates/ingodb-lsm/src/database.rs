@@ -185,7 +185,7 @@ mod tests {
     use super::*;
     use crate::secondary;
     use ingodb_blob::{DocumentId, Value};
-    use ingodb_query::{Filter, SortDirection, SortField};
+    use ingodb_query::{SortDirection, SortField};
 
     fn test_db() -> (Database, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
