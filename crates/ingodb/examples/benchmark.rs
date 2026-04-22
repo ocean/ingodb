@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 const NUM_PRODUCTS: u64 = 1_000_000;
 const NUM_LOOKUPS: u64 = 20_000;
-const NUM_SCAN_QUERIES: u64 = 50;
 const CATEGORIES: &[&str] = &[
     "electronics",
     "books",
@@ -250,7 +249,7 @@ fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
     let mut i = 0u64;
     while i < NUM_PRODUCTS {
         let end = (i + BATCH_SIZE).min(NUM_PRODUCTS);
-        let mut batch: Vec<IBlob> = (i..end)
+        let batch: Vec<IBlob> = (i..end)
             .map(|j| {
                 let blob = make_product(j);
                 ids.push(*blob.id());
@@ -260,7 +259,7 @@ fn phase_bulk_ingest(engine: &Arc<LsmEngine>) -> Vec<DocumentId> {
         engine.put_batch(batch).unwrap();
         i = end;
 
-        if i % 10_000 == 0 {
+        if i.is_multiple_of(10_000) {
             let elapsed = start.elapsed();
             let rate = i as f64 / elapsed.as_secs_f64();
             eprint!("\r  {}/{} ({:.0} docs/sec)", i, NUM_PRODUCTS, rate);
@@ -493,7 +492,7 @@ fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
             ids[idx],
             [
                 ("type".into(), Value::String("product".into())),
-                ("name".into(), Value::String(format!("UPDATED Product"))),
+                ("name".into(), Value::String("UPDATED Product".to_string())),
                 ("price".into(), Value::F64(999.99)),
                 ("category".into(), Value::String("updated".into())),
                 ("rating".into(), Value::F64(0.0)),
@@ -512,10 +511,10 @@ fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let mut snapshot_correct = 0u64;
     for i in 0..100 {
         let idx = ((i * 3571) % ids.len() as u64) as usize;
-        if let Some(blob) = snap.get(&ids[idx]).unwrap() {
-            if blob.get("name") != Some(&Value::String("UPDATED Product".into())) {
-                snapshot_correct += 1;
-            }
+        if let Some(blob) = snap.get(&ids[idx]).unwrap()
+            && blob.get("name") != Some(&Value::String("UPDATED Product".into()))
+        {
+            snapshot_correct += 1;
         }
     }
     let snap_time = t.elapsed();
@@ -530,10 +529,10 @@ fn phase_snapshot_reads(engine: &Arc<LsmEngine>, ids: &[DocumentId]) {
     let mut latest_updated = 0u64;
     for i in 0..100 {
         let idx = ((i * 3571) % ids.len() as u64) as usize;
-        if let Some(blob) = engine.get(&ids[idx]).unwrap() {
-            if blob.get("name") == Some(&Value::String("UPDATED Product".into())) {
-                latest_updated += 1;
-            }
+        if let Some(blob) = engine.get(&ids[idx]).unwrap()
+            && blob.get("name") == Some(&Value::String("UPDATED Product".into()))
+        {
+            latest_updated += 1;
         }
     }
     let latest_time = t.elapsed();
