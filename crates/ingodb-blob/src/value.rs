@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_f64() {
-        roundtrip(&Value::F64(3.14159));
+        roundtrip(&Value::F64(1.23456));
         roundtrip(&Value::F64(f64::NEG_INFINITY));
     }
 
