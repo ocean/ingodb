@@ -16,6 +16,12 @@ pub type ContentHash = [u8; 32];
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DocumentId([u8; 16]);
 
+impl Default for DocumentId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DocumentId {
     /// Generate a new UUIDv7-based document ID (timestamp + random).
     pub fn new() -> Self {
