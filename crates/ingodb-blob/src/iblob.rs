@@ -328,13 +328,17 @@ impl IBlob {
         // Index count (offset 71..75)
         let index_count = u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
 
-        let index_end = HEADER_SIZE + index_count * INDEX_ENTRY_SIZE;
-        if buf.len() < index_end {
+        // Bound index_count against the remaining buffer before computing index_end.
+        // A corrupt or malicious blob could otherwise overflow the multiplication
+        // (on 32-bit targets) or pre-allocate a huge Vec below.
+        let max_index_count = (buf.len() - HEADER_SIZE) / INDEX_ENTRY_SIZE;
+        if index_count > max_index_count {
             return Err(BlobError::BufferTooShort {
-                need: index_end,
+                need: HEADER_SIZE.saturating_add(index_count.saturating_mul(INDEX_ENTRY_SIZE)),
                 have: buf.len(),
             });
         }
+        let index_end = HEADER_SIZE + index_count * INDEX_ENTRY_SIZE;
 
         // Read index entries
         let mut index_entries = Vec::with_capacity(index_count);
@@ -419,6 +423,16 @@ impl IBlob {
         }
 
         let index_count = u32::from_le_bytes(buf[71..75].try_into().unwrap()) as usize;
+
+        // Bound index_count against the remaining buffer so a corrupt header
+        // can't trigger a panic in the slice operations below.
+        let max_index_count = (buf.len() - HEADER_SIZE) / INDEX_ENTRY_SIZE;
+        if index_count > max_index_count {
+            return Err(BlobError::BufferTooShort {
+                need: HEADER_SIZE.saturating_add(index_count.saturating_mul(INDEX_ENTRY_SIZE)),
+                have: buf.len(),
+            });
+        }
         let index_end = HEADER_SIZE + index_count * INDEX_ENTRY_SIZE;
 
         let target_hash = Self::key_hash(field_name);
@@ -447,15 +461,51 @@ impl IBlob {
             let offset = u32::from_le_bytes(buf[base + 8..base + 12].try_into().unwrap()) as usize;
             let length = u32::from_le_bytes(buf[base + 12..base + 16].try_into().unwrap()) as usize;
 
-            let payload_start = index_end + offset;
-            let field_data = &buf[payload_start..payload_start + length];
+            let payload_start = index_end
+                .checked_add(offset)
+                .ok_or(BlobError::BufferTooShort {
+                    need: 0,
+                    have: buf.len(),
+                })?;
+            let payload_end =
+                payload_start
+                    .checked_add(length)
+                    .ok_or(BlobError::BufferTooShort {
+                        need: 0,
+                        have: buf.len(),
+                    })?;
+            if payload_end > buf.len() {
+                return Err(BlobError::BufferTooShort {
+                    need: payload_end,
+                    have: buf.len(),
+                });
+            }
+            let field_data = &buf[payload_start..payload_end];
 
             // Check actual key
+            if field_data.len() < 4 {
+                return Err(BlobError::BufferTooShort {
+                    need: 4,
+                    have: field_data.len(),
+                });
+            }
             let key_len = u32::from_le_bytes(field_data[0..4].try_into().unwrap()) as usize;
-            let key = std::str::from_utf8(&field_data[4..4 + key_len])?;
+            let key_end = 4usize
+                .checked_add(key_len)
+                .ok_or(BlobError::BufferTooShort {
+                    need: 0,
+                    have: field_data.len(),
+                })?;
+            if key_end > field_data.len() {
+                return Err(BlobError::BufferTooShort {
+                    need: key_end,
+                    have: field_data.len(),
+                });
+            }
+            let key = std::str::from_utf8(&field_data[4..key_end])?;
 
             if key == field_name {
-                let (value, _) = Value::decode(field_data, 4 + key_len)?;
+                let (value, _) = Value::decode(field_data, key_end)?;
                 return Ok(value);
             }
             lo += 1;
