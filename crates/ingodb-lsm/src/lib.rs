@@ -162,8 +162,6 @@ pub struct LsmEngine {
     active_snapshots: Mutex<BTreeSet<DocumentId>>,
     /// Group commit: pending WAL writes from concurrent put() calls
     wal_batch: Mutex<Vec<IBlob>>,
-    /// Notifies waiting writers that their batch was committed
-    wal_batch_done: Condvar,
     /// Background compaction signaling
     compaction_signal: Arc<CompactionSignal>,
     /// Background compaction thread handle
@@ -302,7 +300,6 @@ impl LsmEngine {
             pending_index_metadata: Mutex::new(Vec::new()),
             active_snapshots: Mutex::new(BTreeSet::new()),
             wal_batch: Mutex::new(Vec::new()),
-            wal_batch_done: Condvar::new(),
             compaction_signal: Arc::new(CompactionSignal {
                 pending: Mutex::new(false),
                 notify: Condvar::new(),
@@ -1884,7 +1881,7 @@ mod tests {
     fn test_flush_and_read_from_sstable() {
         let (engine, _dir) = test_engine();
 
-        let blobs: Vec<_> = (0..10).map(|i| make_blob(i)).collect();
+        let blobs: Vec<_> = (0..10).map(make_blob).collect();
         let ids: Vec<_> = blobs.iter().map(|b| *b.id()).collect();
         for b in &blobs {
             engine.put(b.clone()).unwrap();
@@ -3543,7 +3540,11 @@ mod tests {
             value: Value::String("electronics".into()),
         };
         engine.scan(Some(&filter), None, None, None).unwrap();
-        assert_eq!(engine.secondary_index_count(), 0, "no index after first scan");
+        assert_eq!(
+            engine.secondary_index_count(),
+            0,
+            "no index after first scan"
+        );
 
         engine.scan(Some(&filter), None, None, None).unwrap();
         assert_eq!(
