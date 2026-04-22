@@ -55,25 +55,53 @@ impl SSTableReader {
             return Err(SSTableError::UnsupportedVersion(version));
         }
 
-        // Parse bloom filter
-        if bloom_offset + bloom_size > data.len() {
+        // Validate offsets against footer start before indexing — footer values
+        // come straight from disk and could be corrupt or adversarial.
+        if index_offset > footer_start {
+            return Err(SSTableError::Corrupted("index_offset past footer".into()));
+        }
+        let bloom_end = bloom_offset
+            .checked_add(bloom_size)
+            .ok_or_else(|| SSTableError::Corrupted("bloom bounds overflow".into()))?;
+        if bloom_end > data.len() {
             return Err(SSTableError::Corrupted("bloom filter out of bounds".into()));
         }
-        let bloom_data = &data[bloom_offset..bloom_offset + bloom_size];
+        let bloom_data = &data[bloom_offset..bloom_end];
+        if bloom_data.len() < 8 {
+            return Err(SSTableError::Corrupted("bloom header truncated".into()));
+        }
         let bloom_num_bits = u32::from_le_bytes(bloom_data[0..4].try_into().unwrap()) as usize;
         let bloom_num_hashes = u32::from_le_bytes(bloom_data[4..8].try_into().unwrap());
         let bloom = BloomFilter::from_bytes(&bloom_data[8..], bloom_num_bits, bloom_num_hashes);
+
+        // Bound index_count against remaining space before allocating — a minimum
+        // entry is 14 bytes (key_len:2 + offset:8 + size:4), so index_count larger
+        // than that is definitely corrupt and must not drive Vec::with_capacity.
+        const MIN_INDEX_ENTRY: usize = 14;
+        let max_entries = footer_start.saturating_sub(index_offset) / MIN_INDEX_ENTRY;
+        if index_count > max_entries {
+            return Err(SSTableError::Corrupted(
+                "index_count exceeds available space".into(),
+            ));
+        }
 
         // Parse block index — variable-length entries: [key_len:2][key_bytes][offset:8][size:4]
         let mut block_indices = Vec::with_capacity(index_count);
         let mut pos = index_offset;
         for _ in 0..index_count {
-            if pos + 2 > footer_start {
+            let key_len_end = pos
+                .checked_add(2)
+                .ok_or_else(|| SSTableError::Corrupted("index offset overflow".into()))?;
+            if key_len_end > footer_start {
                 return Err(SSTableError::Corrupted("index entry truncated".into()));
             }
-            let key_len = u16::from_le_bytes(data[pos..pos + 2].try_into().unwrap()) as usize;
-            pos += 2;
-            if pos + key_len + 12 > footer_start {
+            let key_len = u16::from_le_bytes(data[pos..key_len_end].try_into().unwrap()) as usize;
+            pos = key_len_end;
+            let entry_end = pos
+                .checked_add(key_len)
+                .and_then(|p| p.checked_add(12))
+                .ok_or_else(|| SSTableError::Corrupted("index offset overflow".into()))?;
+            if entry_end > footer_start {
                 return Err(SSTableError::Corrupted("index entry truncated".into()));
             }
             let last_key = data[pos..pos + key_len].to_vec();
@@ -112,13 +140,18 @@ impl SSTableReader {
     /// Extract the first key from a block without full parsing.
     fn extract_first_key(data: &[u8], block: &BlockIndex) -> Result<Vec<u8>, SSTableError> {
         let start = block.offset as usize;
-        let end = start + block.size as usize;
+        let end = start
+            .checked_add(block.size as usize)
+            .ok_or_else(|| SSTableError::Corrupted("block bounds overflow".into()))?;
 
         if end > data.len() {
             return Err(SSTableError::Corrupted("block out of bounds".into()));
         }
 
         let block_data = &data[start..end];
+        if block_data.len() < 4 {
+            return Err(SSTableError::Corrupted("block header truncated".into()));
+        }
         let stored_crc = u32::from_le_bytes(block_data[0..4].try_into().unwrap());
         let compressed = &block_data[4..];
         let computed_crc = crc32fast::hash(compressed);
@@ -381,7 +414,9 @@ impl SSTableReader {
 
     fn read_block(&self, block: &BlockIndex) -> Result<Vec<(Vec<u8>, IBlob)>, SSTableError> {
         let start = block.offset as usize;
-        let end = start + block.size as usize;
+        let end = start
+            .checked_add(block.size as usize)
+            .ok_or_else(|| SSTableError::Corrupted("block bounds overflow".into()))?;
 
         if end > self.data.len() {
             return Err(SSTableError::Corrupted(format!(
@@ -393,6 +428,9 @@ impl SSTableReader {
         let block_data = &self.data[start..end];
 
         // Verify CRC
+        if block_data.len() < 4 {
+            return Err(SSTableError::Corrupted("block header truncated".into()));
+        }
         let stored_crc = u32::from_le_bytes(block_data[0..4].try_into().unwrap());
         let compressed = &block_data[4..];
         let computed_crc = crc32fast::hash(compressed);
@@ -408,40 +446,65 @@ impl SSTableReader {
             .map_err(|e| SSTableError::Corrupted(format!("LZ4 decompress failed: {e}")))?;
 
         // Parse entries: [entry_count:4][key_len:2][key_bytes][blob_len:4][blob_bytes]...
+        if decompressed.len() < 4 {
+            return Err(SSTableError::Corrupted("block missing entry_count".into()));
+        }
         let entry_count = u32::from_le_bytes(decompressed[0..4].try_into().unwrap()) as usize;
+        // Bound entry_count before Vec::with_capacity — minimum per-entry cost
+        // is 6 bytes (key_len:2 + blob_len:4), so a sane upper bound is
+        // remaining bytes / 6. This prevents DoS via a crafted entry_count.
+        const MIN_ENTRY_BYTES: usize = 6;
+        let max_entries = decompressed.len().saturating_sub(4) / MIN_ENTRY_BYTES;
+        if entry_count > max_entries {
+            return Err(SSTableError::Corrupted(
+                "entry_count exceeds block size".into(),
+            ));
+        }
         let mut entries = Vec::with_capacity(entry_count);
-        let mut pos = 4;
+        let mut pos: usize = 4;
 
         for _ in 0..entry_count {
-            if pos + 2 > decompressed.len() {
+            let kl_end = pos
+                .checked_add(2)
+                .ok_or_else(|| SSTableError::Corrupted("block pos overflow".into()))?;
+            if kl_end > decompressed.len() {
                 return Err(SSTableError::Corrupted("truncated key_len in block".into()));
             }
             let key_len =
-                u16::from_le_bytes(decompressed[pos..pos + 2].try_into().unwrap()) as usize;
-            pos += 2;
+                u16::from_le_bytes(decompressed[pos..kl_end].try_into().unwrap()) as usize;
+            pos = kl_end;
 
-            if pos + key_len > decompressed.len() {
+            let key_end = pos
+                .checked_add(key_len)
+                .ok_or_else(|| SSTableError::Corrupted("block pos overflow".into()))?;
+            if key_end > decompressed.len() {
                 return Err(SSTableError::Corrupted("truncated key in block".into()));
             }
-            let key = decompressed[pos..pos + key_len].to_vec();
-            pos += key_len;
+            let key = decompressed[pos..key_end].to_vec();
+            pos = key_end;
 
-            if pos + 4 > decompressed.len() {
+            let bl_end = pos
+                .checked_add(4)
+                .ok_or_else(|| SSTableError::Corrupted("block pos overflow".into()))?;
+            if bl_end > decompressed.len() {
                 return Err(SSTableError::Corrupted(
                     "truncated blob_len in block".into(),
                 ));
             }
             let blob_len =
-                u32::from_le_bytes(decompressed[pos..pos + 4].try_into().unwrap()) as usize;
-            pos += 4;
+                u32::from_le_bytes(decompressed[pos..bl_end].try_into().unwrap()) as usize;
+            pos = bl_end;
 
-            if pos + blob_len > decompressed.len() {
+            let blob_end = pos
+                .checked_add(blob_len)
+                .ok_or_else(|| SSTableError::Corrupted("block pos overflow".into()))?;
+            if blob_end > decompressed.len() {
                 return Err(SSTableError::Corrupted("truncated blob in block".into()));
             }
 
-            let blob = IBlob::decode(&decompressed[pos..pos + blob_len])?;
+            let blob = IBlob::decode(&decompressed[pos..blob_end])?;
             entries.push((key, blob));
-            pos += blob_len;
+            pos = blob_end;
         }
 
         Ok(entries)
