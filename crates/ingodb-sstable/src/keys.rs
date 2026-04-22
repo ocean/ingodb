@@ -120,7 +120,6 @@ pub fn encode_comparable_value(value: &Value) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ingodb_blob::DocumentId;
 
     #[test]
     fn test_i64_ordering() {

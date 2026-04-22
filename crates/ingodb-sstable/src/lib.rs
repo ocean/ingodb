@@ -27,7 +27,7 @@ pub const FOOTER_SIZE: usize = 30;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ingodb_blob::{DocumentId, IBlob, Value};
+    use ingodb_blob::{IBlob, Value};
 
     fn make_entries(n: usize) -> Vec<IBlob> {
         (0..n)
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn test_comparable_encoding_order() {
         // Verify that byte encoding preserves value ordering
-        let vals = vec![
+        let vals = [
             Value::U64(0),
             Value::U64(1),
             Value::U64(255),
@@ -220,7 +220,7 @@ mod tests {
             );
         }
 
-        let strings = vec![
+        let strings = [
             Value::String("".into()),
             Value::String("a".into()),
             Value::String("ab".into()),
