@@ -263,6 +263,15 @@ impl LsmEngine {
             let mut sst_files: Vec<_> = std::fs::read_dir(&sst_dir)?
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().extension().is_some_and(|ext| ext == "sst"))
+                .filter(|e| {
+                    // Skip secondary-index SSTables (idx_*.sst). They have a
+                    // different on-disk shape (projected fields only) and must
+                    // not be opened here as primary data — doing so caused
+                    // post-reopen scans to silently return zero results.
+                    e.file_name()
+                        .to_str()
+                        .is_none_or(|n| !n.starts_with("idx_"))
+                })
                 .collect();
 
             // Sort by name (which encodes creation order)
