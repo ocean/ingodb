@@ -13,6 +13,87 @@ use crate::LsmError;
 /// Minimum number of results before sorting spills to disk as a partial index.
 pub const SPILL_THRESHOLD: usize = 1000;
 
+/// Suffix for the sidecar metadata file written next to each persisted
+/// full-range secondary-index SSTable.
+pub const META_SUFFIX: &str = ".meta";
+
+/// Write a sidecar metadata file next to a full-range index SSTable so the
+/// engine can rehydrate it on reopen. Format is a tiny 2-line text file:
+///   fields=f1,f2,f3
+///   is_full_range=true
+/// Partial indexes (range != None) do not get a sidecar because the engine
+/// cannot safely reuse a range-restricted index without also persisting the
+/// exact range filter — those idx files are treated as orphans on reopen.
+pub fn write_meta_sidecar(idx_path: &Path, fields: &[String]) -> std::io::Result<()> {
+    let meta_path = meta_path_for(idx_path);
+    let body = format!("fields={}\nis_full_range=true\n", fields.join(","));
+    std::fs::write(meta_path, body)
+}
+
+/// Read a sidecar metadata file. Returns the fields list if the file exists,
+/// parses cleanly, and is marked as a full-range index. Returns None for any
+/// parse error or for partial indexes (they're treated as orphans on reopen).
+pub fn read_meta_sidecar(idx_path: &Path) -> Option<Vec<String>> {
+    let meta_path = meta_path_for(idx_path);
+    let body = std::fs::read_to_string(meta_path).ok()?;
+    let mut fields: Option<Vec<String>> = None;
+    let mut full = false;
+    for line in body.lines() {
+        if let Some(rest) = line.strip_prefix("fields=") {
+            fields = Some(rest.split(',').map(|s| s.to_string()).collect());
+        } else if line == "is_full_range=true" {
+            full = true;
+        }
+    }
+    match (fields, full) {
+        (Some(f), true) if !f.is_empty() => Some(f),
+        _ => None,
+    }
+}
+
+/// Derive the sidecar path from an idx SSTable path.
+pub fn meta_path_for(idx_path: &Path) -> PathBuf {
+    let mut s = idx_path.as_os_str().to_os_string();
+    s.push(META_SUFFIX);
+    PathBuf::from(s)
+}
+
+/// Sanity-check a freshly opened index against primary documents.
+///
+/// Reads a small sample of entries from the index and, for each, verifies
+/// that (a) the primary has a live document with that `_id`, and (b) that
+/// document's projected fields match the index entry. Returns Err if any
+/// mismatch is found — the caller should discard the index in that case
+/// and let it be rebuilt on demand.
+pub fn validate_against_primary(
+    index: &SecondaryIndex,
+    lookup: &dyn Fn(&DocumentId) -> Option<IBlob>,
+    sample_size: usize,
+) -> Result<u64, LsmError> {
+    // iter() is not streaming (it loads the whole SSTable), but this is a
+    // one-time cost on startup and we immediately sub-sample.
+    let entries = index.reader.iter()?;
+    let total = entries.len() as u64;
+    if total == 0 {
+        return Ok(0);
+    }
+    let step = (entries.len() / sample_size.max(1)).max(1);
+    for (_key, idx_blob) in entries.iter().step_by(step).take(sample_size) {
+        let Some(primary) = lookup(idx_blob.id()) else {
+            return Err(LsmError::SSTable(ingodb_sstable::SSTableError::Empty));
+        };
+        if primary.is_deleted() {
+            return Err(LsmError::SSTable(ingodb_sstable::SSTableError::Empty));
+        }
+        for f in &index.fields {
+            if primary.get(f) != idx_blob.get(f) {
+                return Err(LsmError::SSTable(ingodb_sstable::SSTableError::Empty));
+            }
+        }
+    }
+    Ok(total)
+}
+
 /// Number of compaction cycles before considering dropping an unused index.
 pub const DROP_COMPACTION_CYCLES: u32 = 10;
 
@@ -368,6 +449,16 @@ impl SecondaryIndex {
         self.reader = SSTableReader::open(&self.path)?;
         self.buffer.lock().clear();
         self.range = range;
+
+        // Keep the sidecar in sync with the new range. Full-range rebuild
+        // gets a sidecar so it rehydrates on restart; partial rebuild removes
+        // any stale sidecar so we don't misidentify it as full-range.
+        if self.range.is_none() {
+            let _ = write_meta_sidecar(&self.path, &self.fields);
+        } else {
+            let _ = std::fs::remove_file(meta_path_for(&self.path));
+        }
+
         Ok(())
     }
 

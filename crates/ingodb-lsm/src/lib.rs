@@ -260,14 +260,13 @@ impl LsmEngine {
         let mut max_id = 0u64;
         let sst_dir = config.data_dir.clone();
         if sst_dir.exists() {
+            // Partition entries into primary SSTables (loaded here) and
+            // secondary-index SSTables (loaded later, after primary + memtable
+            // are ready so we can cross-check each index against live data).
             let mut sst_files: Vec<_> = std::fs::read_dir(&sst_dir)?
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().extension().is_some_and(|ext| ext == "sst"))
                 .filter(|e| {
-                    // Skip secondary-index SSTables (idx_*.sst). They have a
-                    // different on-disk shape (projected fields only) and must
-                    // not be opened here as primary data — doing so caused
-                    // post-reopen scans to silently return zero results.
                     e.file_name()
                         .to_str()
                         .is_none_or(|n| !n.starts_with("idx_"))
@@ -297,7 +296,7 @@ impl LsmEngine {
         let ucs = UcsCompaction::new(initial_w, config.memtable_size as u64);
         sort_sstables_by_level(&mut sstables, &ucs);
 
-        Ok(LsmEngine {
+        let engine = LsmEngine {
             config,
             memtable: RwLock::new(memtable),
             immutable_memtables: Mutex::new(Vec::new()),
@@ -324,7 +323,70 @@ impl LsmEngine {
             read_count: AtomicU64::new(0),
             write_count: AtomicU64::new(0),
             last_w_adjustment: Mutex::new(Instant::now()),
-        })
+        };
+
+        engine.rehydrate_secondary_indexes()?;
+
+        Ok(engine)
+    }
+
+    /// Discover `idx_*.sst` files in the data dir, load those with a valid
+    /// `.meta` sidecar as full-range secondary indexes, and validate each
+    /// against the freshly-loaded primary SSTables + memtable. Indexes
+    /// without a sidecar or that fail validation are left untouched on disk
+    /// (they'll be rebuilt on demand) but not loaded.
+    fn rehydrate_secondary_indexes(&self) -> Result<(), LsmError> {
+        let data_dir = &self.config.data_dir;
+        if !data_dir.exists() {
+            return Ok(());
+        }
+
+        // Lookup helper closes over &self to check primary SSTables + memtable.
+        let lookup = |id: &DocumentId| -> Option<IBlob> { self.get(id).ok().flatten() };
+
+        let idx_entries: Vec<_> = std::fs::read_dir(data_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let is_sst = e.path().extension().is_some_and(|ext| ext == "sst");
+                let is_idx = e
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with("idx_"));
+                is_sst && is_idx
+            })
+            .collect();
+
+        for entry in idx_entries {
+            let idx_path = entry.path();
+            let Some(fields) = secondary::read_meta_sidecar(&idx_path) else {
+                // No sidecar (or partial-range index) — skip. The orphaned
+                // SSTable stays on disk; a future compaction pass can clean
+                // it up. We don't delete here to avoid destructive action
+                // during open.
+                continue;
+            };
+            match secondary::SecondaryIndex::open(fields.clone(), None, &idx_path) {
+                Ok(index) => match secondary::validate_against_primary(&index, &lookup, 5) {
+                    Ok(_) => {
+                        self.secondary_indexes.lock().push(index);
+                    }
+                    Err(_) => {
+                        eprintln!(
+                            "warning: secondary index {} failed validation — skipping",
+                            idx_path.display()
+                        );
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "warning: failed to open secondary index {}: {e}",
+                        idx_path.display()
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Insert a document into the engine.
@@ -656,6 +718,7 @@ impl LsmEngine {
         // Drop unused indexes
         indexes.retain(|idx| {
             if idx.should_drop() {
+                let _ = std::fs::remove_file(secondary::meta_path_for(&idx.path));
                 std::fs::remove_file(&idx.path).ok();
                 false
             } else {
@@ -696,11 +759,13 @@ impl LsmEngine {
                     &merged_path,
                     self.config.block_size,
                 ) {
+                    let _ = secondary::write_meta_sidecar(&merged_path, fields);
                     // Remove old indexes (reverse order to keep indices valid).
                     let mut to_remove: Vec<usize> = group_indices.clone();
                     to_remove.sort_unstable_by(|a, b| b.cmp(a));
                     for i in to_remove {
                         let old = indexes.remove(i);
+                        let _ = std::fs::remove_file(secondary::meta_path_for(&old.path));
                         std::fs::remove_file(&old.path).ok();
                     }
                     indexes.push(merged);
@@ -1122,6 +1187,8 @@ impl LsmEngine {
         )?;
         drop(sstables);
 
+        secondary::write_meta_sidecar(&idx_path, sort_fields)?;
+
         let meta = IndexMetadata {
             fields: sort_fields.to_vec(),
             path: idx_path,
@@ -1272,6 +1339,14 @@ impl LsmEngine {
             self.config.block_size,
         )?;
 
+        // Only full-range indexes persist across restarts. Range-restricted
+        // partial indexes don't get a sidecar: we can't reuse them safely
+        // without also persisting the exact range filter, and rebuilding a
+        // partial index at query time is cheap relative to primary scans.
+        if index.range.is_none() {
+            secondary::write_meta_sidecar(&idx_path, sort_fields)?;
+        }
+
         let meta = IndexMetadata {
             fields: sort_fields.to_vec(),
             path: idx_path,
@@ -1286,6 +1361,7 @@ impl LsmEngine {
             .position(|idx| idx.matches_sort(sort_fields) && idx.range == range)
         {
             let old = indexes.remove(pos);
+            let _ = std::fs::remove_file(secondary::meta_path_for(&old.path));
             std::fs::remove_file(&old.path).ok();
         }
         indexes.push(index);
@@ -1386,12 +1462,22 @@ impl LsmEngine {
     }
 
     /// Load an existing secondary index from disk.
+    ///
+    /// No-op if an index at the same path is already loaded. This lets
+    /// `Database::open` call this after `LsmEngine::open` has already
+    /// rehydrated via sidecar metadata, without producing duplicates.
     pub fn load_secondary_index(
         &self,
         fields: Vec<String>,
         range: Option<Filter>,
         path: &Path,
     ) -> Result<(), LsmError> {
+        {
+            let indexes = self.secondary_indexes.lock();
+            if indexes.iter().any(|idx| idx.path == path) {
+                return Ok(());
+            }
+        }
         let index = secondary::SecondaryIndex::open(fields, range, path)?;
         self.secondary_indexes.lock().push(index);
         Ok(())
@@ -3441,6 +3527,84 @@ mod tests {
             // TODO: Once flush writes index entries to disk atomically,
             // this test should also verify sorted scan via index works after restart.
         }
+    }
+
+    #[test]
+    fn test_reopen_skips_idx_sstables() {
+        // Regression: LsmEngine::open previously globbed *.sst and opened
+        // idx_*.sst files as data SSTables, causing scans to return 0 results
+        // after a restart of a DB that had built any secondary index.
+        let dir = tempfile::tempdir().unwrap();
+        let config = LsmConfig {
+            data_dir: dir.path().to_path_buf(),
+            memtable_size: 1024 * 1024,
+            block_size: 512,
+            compaction_threshold: 100,
+            scaling_parameter: 0,
+            sort_spill_threshold: 5,
+            compaction_threads: 1,
+            adaptive_w: false,
+            adaptive_w_cooldown_secs: 1,
+            adaptive_w_max_step: 2,
+            adaptive_w_min: -8,
+            adaptive_w_max: 8,
+        };
+
+        {
+            let engine = LsmEngine::open(config.clone()).unwrap();
+            for i in 0..20u64 {
+                engine
+                    .put(IBlob::from_pairs(vec![
+                        ("postcode", Value::U64(2600 + (i % 3))),
+                        ("type", Value::String("address".into())),
+                    ]))
+                    .unwrap();
+            }
+            engine.flush_memtable().unwrap();
+
+            // Force a secondary index to be built by doing a sorted scan.
+            let sort = [SortField {
+                field: "postcode".into(),
+                direction: SortDirection::Ascending,
+            }];
+            engine.scan(None, Some(&sort), None, None).unwrap();
+            assert!(engine.secondary_index_count() >= 1);
+        }
+
+        // An idx_*.sst must now exist on disk alongside the data SSTable.
+        let has_idx = std::fs::read_dir(&config.data_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with("idx_") && n.ends_with(".sst"))
+            });
+        assert!(has_idx, "expected an idx_*.sst on disk");
+
+        // Reopen — the idx_*.sst must not be loaded as a data SSTable, and
+        // the full-range index must be rehydrated via its .meta sidecar.
+        let engine = LsmEngine::open(config).unwrap();
+        let results = engine
+            .scan(
+                Some(&Filter::Eq {
+                    field: "postcode".into(),
+                    value: Value::U64(2600),
+                }),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(
+            !results.is_empty(),
+            "filter scan returned 0 results after reopen — idx_*.sst likely being read as data"
+        );
+        assert_eq!(
+            engine.secondary_index_count(),
+            1,
+            "full-range secondary index should have been rehydrated from its .meta sidecar"
+        );
     }
 
     #[test]
