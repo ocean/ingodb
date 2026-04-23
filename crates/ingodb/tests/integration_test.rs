@@ -629,12 +629,12 @@ fn test_query_stats_recorded() {
         ps.total_returned, 20,
         "4 docs returned × 5 runs (age 16,17,18,19)"
     );
-    // A reactive filter index is built after scan 2 (docs_scanned=20 > threshold=5).
-    // Scans 3-5 use the index and record docs_scanned=docs_returned=4 each.
-    // Total: 20+20+4+4+4 = 52 — confirms the index reduced scan cost.
+    // A reactive filter index is built after scan 3 (DEFAULT_INDEX_THRESHOLD=3).
+    // Scans 4-5 use the index and record docs_scanned=docs_returned=4 each.
+    // Total: 20+20+20+4+4 = 68 — confirms the index reduced scan cost.
     assert_eq!(
-        ps.total_scanned, 52,
-        "first two scans full (20 each), then 3 via index (4 each)"
+        ps.total_scanned, 68,
+        "first three scans full (20 each), then 2 via index (4 each)"
     );
 }
 
@@ -749,7 +749,7 @@ fn test_filter_index_built_for_selective_queries() {
         "no index before any scan"
     );
 
-    // First scan: records stats (count=1), no index yet.
+    // Scans 1 and 2: stats accumulate, index not yet built (count < DEFAULT_INDEX_THRESHOLD=3).
     let results1 = engine.scan(Some(&filter), None, None, None).unwrap();
     assert_eq!(results1.len(), 5, "first scan returns 5 docs");
     assert_eq!(
@@ -758,20 +758,28 @@ fn test_filter_index_built_for_selective_queries() {
         "no index after first scan"
     );
 
-    // Second scan: stats.count=2, docs_scanned=500 > threshold=100, selectivity=0.01 < 0.5.
-    // Index is built reactively.
     let results2 = engine.scan(Some(&filter), None, None, None).unwrap();
     assert_eq!(results2.len(), 5, "second scan returns 5 docs");
     assert_eq!(
         engine.secondary_index_count(),
-        1,
-        "filter index built after second scan"
+        0,
+        "no index after second scan"
     );
 
-    // Third scan uses the index: O(log N + R) instead of O(N).
+    // Third scan: stats.count=3 == DEFAULT_INDEX_THRESHOLD, docs_scanned=500 > threshold=100,
+    // selectivity=0.01 < 0.5. Index is built reactively.
     let results3 = engine.scan(Some(&filter), None, None, None).unwrap();
-    assert_eq!(results3.len(), 5, "third scan returns 5 docs via index");
-    for doc in &results3 {
+    assert_eq!(results3.len(), 5, "third scan returns 5 docs");
+    assert_eq!(
+        engine.secondary_index_count(),
+        1,
+        "filter index built after third scan (DEFAULT_INDEX_THRESHOLD=3)"
+    );
+
+    // Fourth scan uses the index: O(log N + R) instead of O(N).
+    let results4 = engine.scan(Some(&filter), None, None, None).unwrap();
+    assert_eq!(results4.len(), 5, "fourth scan returns 5 docs via index");
+    for doc in &results4 {
         assert_eq!(doc.get("category"), Some(&Value::String("rare".into())));
     }
 }
@@ -870,8 +878,8 @@ fn test_filter_index_survives_restart() {
             value: Value::String("rare".into()),
         };
 
-        // Two scans to trigger reactive index creation.
-        for _ in 0..2 {
+        // Three scans to trigger reactive index creation (DEFAULT_INDEX_THRESHOLD=3).
+        for _ in 0..3 {
             db.with_collection("items", |engine: &LsmEngine| {
                 engine.scan(Some(&filter), None, None, None)?;
                 Ok(())
